@@ -1,4 +1,4 @@
-import { callPeer, cancelPeer, followPeer, pagePeer, promptPeer, readPeer, type RemoteSession } from './peer'
+import { callPeer, cancelPeer, followPeer, pagePeer, promptPeer, readPeer, searchPeer, type RemoteSession } from './peer'
 import { machineGroupPath, remoteSessionId } from './tree'
 
 export interface ListedSession {
@@ -99,6 +99,39 @@ export async function* followRemote(sessionId: string, request: Record<string, u
     const encoded = JSON.stringify(frame).split(remote.sessionId).join(sessionId)
     yield JSON.parse(encoded) as unknown
   }
+}
+
+export async function forkRemote(sessionId: string, request: Record<string, unknown>): Promise<unknown | undefined> {
+  const remote = parseRemoteSessionId(sessionId)
+  if (remote === undefined) return undefined
+  const value = await callPeer(remote.peer, 'fork', remote.sessionId, request) as { sessionId?: string }
+  if (typeof value.sessionId !== 'string') return value
+  return { ...value, sessionId: remoteSessionId(remote.peer, value.sessionId) }
+}
+
+export async function searchWithPeers<T extends { items?: readonly { sessionId?: string, snippet?: string }[] }>(
+  local: T,
+  peers: readonly string[],
+  query: string,
+): Promise<T> {
+  const items = [...(local.items ?? [])]
+  const seen = new Set(items.flatMap(item => typeof item.sessionId === 'string' ? [item.sessionId] : []))
+  for (const peer of peers) {
+    let hits: { sessionId: string, snippet: string }[] = []
+    try {
+      hits = await searchPeer(peer, query)
+    } catch {
+      continue
+    }
+    for (const hit of hits) {
+      if (hit.sessionId.startsWith('ahoy:')) continue
+      const sessionId = remoteSessionId(peer, hit.sessionId)
+      if (seen.has(sessionId)) continue
+      seen.add(sessionId)
+      items.push({ sessionId, snippet: hit.snippet })
+    }
+  }
+  return { ...local, items }
 }
 
 export async function modelRemote(sessionId: string, request: Record<string, unknown>): Promise<unknown | undefined> {

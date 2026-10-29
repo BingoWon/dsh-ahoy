@@ -20,7 +20,8 @@ export interface SessionBridge {
   prompt(sessionId: string, text: string): Promise<PromptResult>
   page?(sessionId: string, request: Record<string, unknown>): Promise<unknown>
   cancel?(sessionId: string): Promise<{ accepted: true }>
-  call?(method: 'projections' | 'rename' | 'updateQueue' | 'selectModel', sessionId: string, request: Record<string, unknown>): Promise<unknown>
+  call?(method: 'projections' | 'rename' | 'updateQueue' | 'selectModel' | 'fork', sessionId: string, request: Record<string, unknown>): Promise<unknown>
+  search?(query: string): Promise<{ sessionId: string, snippet: string }[]>
   follow?(sessionId: string, request: Record<string, unknown>, signal: AbortSignal): AsyncIterable<unknown>
   approvals?(): Promise<{ sessionId: string, toolName: string, reason?: string }[]>
   answer?(sessionId: string, outcome: 'allowed-once' | 'rejected'): Promise<{ accepted: true }>
@@ -156,7 +157,7 @@ async function handle(request: IncomingMessage, response: ServerResponse, sessio
         return
       }
       const body = JSON.parse(await readBody(request)) as { method?: unknown, sessionId?: unknown, request?: unknown }
-      if ((body.method !== 'projections' && body.method !== 'rename' && body.method !== 'updateQueue' && body.method !== 'selectModel') || typeof body.sessionId !== 'string') {
+      if ((body.method !== 'projections' && body.method !== 'rename' && body.method !== 'updateQueue' && body.method !== 'selectModel' && body.method !== 'fork') || typeof body.sessionId !== 'string') {
         sendJson(response, 400, { error: 'method and sessionId are required' })
         return
       }
@@ -175,6 +176,19 @@ async function handle(request: IncomingMessage, response: ServerResponse, sessio
         return
       }
       sendJson(response, 200, await sessions.cancel(body.sessionId))
+      return
+    }
+    if (request.url === '/v1/search') {
+      if (sessions.search === undefined) {
+        sendJson(response, 200, { items: [] })
+        return
+      }
+      const body = JSON.parse(await readBody(request)) as { query?: unknown }
+      if (typeof body.query !== 'string') {
+        sendJson(response, 400, { error: 'query is required' })
+        return
+      }
+      sendJson(response, 200, { items: await sessions.search(body.query) })
       return
     }
     if (request.url === '/v1/approvals') {
@@ -250,7 +264,18 @@ export async function* followPeer(baseUrl: string, sessionId: string, request: R
   }
 }
 
-export async function callPeer(baseUrl: string, method: 'projections' | 'rename' | 'updateQueue' | 'selectModel', sessionId: string, request: Record<string, unknown>): Promise<unknown> {
+export async function searchPeer(baseUrl: string, query: string): Promise<{ sessionId: string, snippet: string }[]> {
+  const response = await fetch(new URL('/v1/search', baseUrl), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...peerAuthHeader(baseUrl) },
+    body: JSON.stringify({ query }),
+  })
+  if (!response.ok) throw new Error(`peer search failed: ${response.status}`)
+  const body = await response.json() as { items?: { sessionId: string, snippet: string }[] }
+  return body.items ?? []
+}
+
+export async function callPeer(baseUrl: string, method: 'projections' | 'rename' | 'updateQueue' | 'selectModel' | 'fork', sessionId: string, request: Record<string, unknown>): Promise<unknown> {
   const response = await fetch(new URL('/v1/session', baseUrl), {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...peerAuthHeader(baseUrl) },
@@ -319,6 +344,8 @@ interface SessionControllerLike {
   rename?(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>
   updateQueue?(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>
   selectModel?(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>
+  fork?(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>
+  search?(request: { query?: string }, signal: AbortSignal): Promise<{ items?: readonly { sessionId?: string, snippet?: string }[] }>
   follow?(request: Record<string, unknown>, signal: AbortSignal): AsyncIterable<unknown>
 }
 
@@ -338,6 +365,8 @@ export function sessionsFromHost(ctx: HostWithSessions, desk?: ApprovalDesk): Se
   const rename = face !== undefined && typeof face.rename === 'function' ? face.rename.bind(face) : undefined
   const updateQueue = face !== undefined && typeof face.updateQueue === 'function' ? face.updateQueue.bind(face) : undefined
   const selectModel = face !== undefined && typeof face.selectModel === 'function' ? face.selectModel.bind(face) : undefined
+  const fork = face !== undefined && typeof face.fork === 'function' ? face.fork.bind(face) : undefined
+  const search = face !== undefined && typeof face.search === 'function' ? face.search.bind(face) : undefined
   const follow = face !== undefined && typeof face.follow === 'function' ? face.follow.bind(face) : undefined
   const page = face !== undefined && typeof face.page === 'function'
     ? face.page.bind(face)
@@ -370,7 +399,11 @@ export function sessionsFromHost(ctx: HostWithSessions, desk?: ApprovalDesk): Se
       yield* follow({ ...request, address: { kind: 'session', sessionId } }, signal)
     },
     async call(method, sessionId, request) {
-      const target = method === 'projections' ? projections : method === 'rename' ? rename : method === 'updateQueue' ? updateQueue : selectModel
+      const target = method === 'projections' ? projections
+        : method === 'rename' ? rename
+          : method === 'updateQueue' ? updateQueue
+            : method === 'selectModel' ? selectModel
+              : fork
       if (target === undefined) throw new Error('这台 DSH 没有这个会话接口')
       return await target({ ...request, sessionId }, new AbortController().signal)
     },
@@ -382,6 +415,14 @@ export function sessionsFromHost(ctx: HostWithSessions, desk?: ApprovalDesk): Se
     async page(sessionId, request) {
       if (page === undefined) throw new Error('这台 DSH 没有历史接口')
       return await page({ ...request, address: { kind: 'session', sessionId } }, new AbortController().signal)
+    },
+    async search(query) {
+      if (search === undefined) return []
+      const value = await search({ query }, new AbortController().signal)
+      return (value.items ?? []).flatMap(item => {
+        if (typeof item.sessionId !== 'string' || typeof item.snippet !== 'string') return []
+        return [{ sessionId: item.sessionId, snippet: item.snippet }]
+      })
     },
     async approvals() {
       return desk?.list() ?? []

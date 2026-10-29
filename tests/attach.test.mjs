@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { cancelRemote, followRemote, listWithPeers, modelRemote, pageRemote, parseRemoteSessionId, projectionRemote, promptRemote, queueRemote, renameRemote } from '../lib/attach.js'
+import { cancelRemote, followRemote, forkRemote, listWithPeers, modelRemote, pageRemote, parseRemoteSessionId, projectionRemote, promptRemote, queueRemote, renameRemote, searchWithPeers } from '../lib/attach.js'
 import { startPeer } from '../lib/index.js'
 import { machineGroupPath, remoteSessionId } from '../lib/tree.js'
 
@@ -19,7 +19,11 @@ test('official list gains the peer session and a prompt goes to that peer', asyn
       yield { type: 'event', sessionId, text: '部署脚本' }
     },
     async call(method, sessionId, request) {
+      if (method === 'fork') return { sessionId: 'session-fork' }
       return { method, sessionId, title: request?.title, values: { title: request?.title ?? '部署脚本' } }
+    },
+    async search(query) {
+      return [{ sessionId: 'session-b', snippet: query }, { sessionId: 'ahoy:skip', snippet: query }]
     },
     async cancel(sessionId) {
       cancels.push(sessionId)
@@ -59,6 +63,10 @@ test('official list gains the peer session and a prompt goes to that peer', asyn
     const queued = await queueRemote(remoteId, { itemId: 'item-1', action: { kind: 'remove' } })
     assert.equal(queued.method, 'updateQueue')
     assert.equal(queued.sessionId, remoteId)
+    const forked = await forkRemote(remoteId, {})
+    assert.equal(forked.sessionId, remoteSessionId(url, 'session-fork'))
+    const found = await searchWithPeers({ items: [] }, [url], '部署')
+    assert.deepEqual(found.items, [{ sessionId: remoteId, snippet: '部署' }])
     const renamed = await renameRemote(remoteId, '新标题')
     assert.equal(renamed.title, '新标题')
     assert.equal(renamed.sessionId, remoteId)

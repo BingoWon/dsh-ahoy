@@ -8,7 +8,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createAhoyTool } from './ahoy-tool'
 import { ApprovalDesk, isApprovalOutcome, sessionIdFromApproval } from './approval'
-import { cancelRemote, followRemote, listWithPeers, modelRemote, pageRemote, projectionRemote, promptRemote, queueRemote, renameRemote } from './attach'
+import { cancelRemote, followRemote, forkRemote, listWithPeers, modelRemote, pageRemote, projectionRemote, promptRemote, queueRemote, renameRemote, searchWithPeers } from './attach'
 import { loadListenPort, loadPeerUrls } from './peers'
 import { answerPeer, approvalsPeer, readPeer, sessionsFromHost, startPeer, type SessionBridge } from './peer'
 
@@ -135,6 +135,8 @@ function installOfficialAttach(ctx: HostContext): void {
     rename?: (request: { sessionId: string, title: string }, signal: AbortSignal) => Promise<unknown>
     updateQueue?: (request: { sessionId: string }, signal: AbortSignal) => Promise<unknown>
     selectModel?: (request: { sessionId: string }, signal: AbortSignal) => Promise<unknown>
+    fork?: (request: { sessionId: string }, signal: AbortSignal) => Promise<unknown>
+    search?: (request: { query?: string }, signal: AbortSignal) => Promise<{ items?: { sessionId?: string }[] }>
     follow?: (request: { address?: { kind?: string, sessionId?: string } }, signal: AbortSignal) => AsyncIterable<unknown>
   } | undefined
   if (face === undefined || typeof face.list !== 'function' || typeof face.prompt !== 'function') return
@@ -145,6 +147,8 @@ function installOfficialAttach(ctx: HostContext): void {
   const originalRename = typeof face.rename === 'function' ? face.rename.bind(face) : undefined
   const originalQueue = typeof face.updateQueue === 'function' ? face.updateQueue.bind(face) : undefined
   const originalModel = typeof face.selectModel === 'function' ? face.selectModel.bind(face) : undefined
+  const originalFork = typeof face.fork === 'function' ? face.fork.bind(face) : undefined
+  const originalSearch = typeof face.search === 'function' ? face.search.bind(face) : undefined
   const originalFollow = typeof face.follow === 'function' ? face.follow.bind(face) : undefined
   console.error(`[dsh-ahoy] 官方会话列表会带上 ${peers.length} 个对方地址`)
   face.list = async (request, signal) => listWithPeers(await originalList(request, signal) as { items?: { sessionId: string }[] }, peers)
@@ -160,6 +164,25 @@ function installOfficialAttach(ctx: HostContext): void {
         return followRemote(sessionId, request, signal)
       }
       return originalFollow(request, signal)
+    }
+  }
+  if (originalSearch !== undefined) {
+    face.search = async (request, signal) => {
+      let local: { items?: { sessionId?: string, snippet?: string }[], hasMore?: boolean } = { items: [], hasMore: false }
+      try {
+        local = await originalSearch(request, signal)
+      } catch {
+        local = { items: [], hasMore: false }
+      }
+      return searchWithPeers(local, peers, request.query ?? '')
+    }
+  }
+  if (originalFork !== undefined) {
+    face.fork = async (request, signal) => {
+      const { sessionId, ...rest } = request
+      const forwarded = await forkRemote(sessionId, rest)
+      if (forwarded !== undefined) return forwarded
+      return originalFork(request, signal)
     }
   }
   if (originalModel !== undefined) {
@@ -220,6 +243,8 @@ function installOfficialAttach(ctx: HostContext): void {
     if (originalRename !== undefined) face.rename = originalRename
     if (originalQueue !== undefined) face.updateQueue = originalQueue
     if (originalModel !== undefined) face.selectModel = originalModel
+    if (originalFork !== undefined) face.fork = originalFork
+    if (originalSearch !== undefined) face.search = originalSearch
     if (originalFollow !== undefined) face.follow = originalFollow
     if (originalPage !== undefined) face.page = originalPage
     if (originalEvents !== undefined) face.events = originalEvents
