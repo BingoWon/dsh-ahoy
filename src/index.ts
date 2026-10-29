@@ -197,7 +197,12 @@ export function apply(ctx: HostContext): void {
     if (!Number.isInteger(port) || port < 0 || port > 65535) {
       throw new Error(`DSH_AHOY_LISTEN 不是端口: ${listen}`)
     }
-    void startPeer(port, bridge, { token: process.env.DSH_AHOY_TOKEN }).then(handle => {
+    const expiresText = process.env.DSH_AHOY_TOKEN_EXPIRES
+  const expiresAt = expiresText !== undefined && expiresText !== '' ? Number(expiresText) : undefined
+  void startPeer(port, bridge, {
+    token: process.env.DSH_AHOY_TOKEN,
+    expiresAt: expiresAt !== undefined && Number.isFinite(expiresAt) ? expiresAt : undefined,
+  }).then(handle => {
       if (stopped) {
         void handle.close()
         return

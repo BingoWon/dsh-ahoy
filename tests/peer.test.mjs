@@ -26,6 +26,25 @@ test('the ahoy tool uses the only paired machine and refuses an unknown one', as
   }
 })
 
+test('an expired pairing token cannot list sessions', async () => {
+  const peer = await startPeer(0, {
+    async list() {
+      return [{ sessionId: 'session-b', title: '部署脚本' }]
+    },
+    async prompt(sessionId) {
+      return { accepted: true, sessionId }
+    },
+  }, { token: 'still-the-token', expiresAt: Date.now() - 1000 })
+  const url = `http://127.0.0.1:${peer.port}`
+  try {
+    setPeerToken(url, 'still-the-token')
+    await assert.rejects(readPeer(url))
+  } finally {
+    setPeerToken(url, undefined)
+    await peer.close()
+  }
+})
+
 test('a revoked pairing token cannot list sessions', async () => {
   const peer = await startPeer(0, {
     async list() {

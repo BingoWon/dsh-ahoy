@@ -52,7 +52,8 @@ function remoteAddress(request: IncomingMessage): string {
   return address.startsWith('::ffff:') ? address.slice(7) : address
 }
 
-function tokenMatches(request: IncomingMessage, expected: string | undefined): boolean {
+function tokenMatches(request: IncomingMessage, expected: string | undefined, expiresAt?: number): boolean {
+  if (expiresAt !== undefined && Date.now() >= expiresAt) return false
   if (expected === undefined || expected === '') return true
   const header = request.headers['x-ahoy-token']
   const got = Array.isArray(header) ? header[0] : header
@@ -63,9 +64,9 @@ function tokenMatches(request: IncomingMessage, expected: string | undefined): b
 }
 
 /** 只接受本机连进来。设了令牌以后，撤销就是换掉这枚令牌。 */
-export function startPeer(port: number, sessions: SessionBridge, options?: { token?: string }): Promise<PeerHandle> {
+export function startPeer(port: number, sessions: SessionBridge, options?: { token?: string, expiresAt?: number }): Promise<PeerHandle> {
   const server: Server = createServer((request, response) => {
-    void handle(request, response, sessions, options?.token)
+    void handle(request, response, sessions, options?.token, options?.expiresAt)
   })
   return new Promise((resolve, reject) => {
     server.once('error', reject)
@@ -85,13 +86,13 @@ export function startPeer(port: number, sessions: SessionBridge, options?: { tok
   })
 }
 
-async function handle(request: IncomingMessage, response: ServerResponse, sessions: SessionBridge, token?: string): Promise<void> {
+async function handle(request: IncomingMessage, response: ServerResponse, sessions: SessionBridge, token?: string, expiresAt?: number): Promise<void> {
   const address = remoteAddress(request)
   if (address !== '127.0.0.1' && address !== '::1') {
     sendJson(response, 403, { error: 'only loopback clients are accepted' })
     return
   }
-  if (!tokenMatches(request, token)) {
+  if (!tokenMatches(request, token, expiresAt)) {
     sendJson(response, 403, { error: 'pairing token was rejected' })
     return
   }

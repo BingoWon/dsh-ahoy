@@ -4,6 +4,8 @@ import { join } from 'node:path'
 export interface PeerRef {
   url: string
   token?: string
+  /** Unix 毫秒。到点之后这台机器不再配对。 */
+  expiresAt?: number
 }
 
 const peerTokens = new Map<string, string>()
@@ -31,7 +33,8 @@ export function peerRefs(envValue: string | undefined, fileText: string | undefi
       if (typeof item === 'string' && item.trim() !== '') return [{ url: item.trim() }]
       if (item !== null && typeof item === 'object' && 'url' in item && typeof item.url === 'string' && item.url.trim() !== '') {
         const token = 'token' in item && typeof item.token === 'string' ? item.token : undefined
-        return [{ url: item.url.trim(), token }]
+        const expiresAt = 'expiresAt' in item && typeof item.expiresAt === 'number' ? item.expiresAt : undefined
+        return [{ url: item.url.trim(), ...token !== undefined ? { token } : {}, ...expiresAt !== undefined ? { expiresAt } : {} }]
       }
       return []
     })
@@ -40,8 +43,12 @@ export function peerRefs(envValue: string | undefined, fileText: string | undefi
   }
 }
 
-export function peerUrls(envValue: string | undefined, fileText: string | undefined): string[] {
-  return peerRefs(envValue, fileText).map(peer => peer.url)
+export function activePeers(peers: readonly PeerRef[], now: number): PeerRef[] {
+  return peers.filter(peer => peer.expiresAt === undefined || peer.expiresAt > now)
+}
+
+export function peerUrls(envValue: string | undefined, fileText: string | undefined, now = Date.now()): string[] {
+  return activePeers(peerRefs(envValue, fileText), now).map(peer => peer.url)
 }
 
 export function peerConfigPath(profileDir: string | undefined): string | undefined {
@@ -84,7 +91,7 @@ export function loadPeerUrls(
       fileText = undefined
     }
   }
-  const refs = peerRefs(env.DSH_AHOY_PEERS, fileText)
+  const refs = activePeers(peerRefs(env.DSH_AHOY_PEERS, fileText), Date.now())
   for (const peer of refs) setPeerToken(peer.url, peer.token)
   return refs.map(peer => peer.url)
 }
