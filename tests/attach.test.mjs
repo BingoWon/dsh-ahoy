@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { cancelRemote, followRemote, listWithPeers, pageRemote, parseRemoteSessionId, projectionRemote, promptRemote } from '../lib/attach.js'
+import { cancelRemote, followRemote, listWithPeers, pageRemote, parseRemoteSessionId, projectionRemote, promptRemote, renameRemote } from '../lib/attach.js'
 import { startPeer } from '../lib/index.js'
 import { machineGroupPath, remoteSessionId } from '../lib/tree.js'
 
@@ -18,8 +18,8 @@ test('official list gains the peer session and a prompt goes to that peer', asyn
     async *follow(sessionId) {
       yield { type: 'event', sessionId, text: '部署脚本' }
     },
-    async call(method, sessionId) {
-      return { method, sessionId, values: { title: '部署脚本' } }
+    async call(method, sessionId, request) {
+      return { method, sessionId, title: request?.title, values: { title: request?.title ?? '部署脚本' } }
     },
     async cancel(sessionId) {
       cancels.push(sessionId)
@@ -53,6 +53,9 @@ test('official list gains the peer session and a prompt goes to that peer', asyn
     assert.deepEqual(cancels, ['session-b'])
     const projection = await projectionRemote(remoteId)
     assert.equal(projection.values.title, '部署脚本')
+    const renamed = await renameRemote(remoteId, '新标题')
+    assert.equal(renamed.title, '新标题')
+    assert.equal(renamed.sessionId, remoteId)
     assert.equal(projection.sessionId, remoteId)
     const frames = []
     for await (const frame of followRemote(remoteId, { maxMessages: 5 }, AbortSignal.timeout(2000))) {

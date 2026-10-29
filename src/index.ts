@@ -8,7 +8,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createAhoyTool } from './ahoy-tool'
 import { ApprovalDesk, isApprovalOutcome, sessionIdFromApproval } from './approval'
-import { cancelRemote, followRemote, listWithPeers, pageRemote, projectionRemote, promptRemote } from './attach'
+import { cancelRemote, followRemote, listWithPeers, pageRemote, projectionRemote, promptRemote, renameRemote } from './attach'
 import { loadListenPort, loadPeerUrls } from './peers'
 import { answerPeer, approvalsPeer, readPeer, sessionsFromHost, startPeer, type SessionBridge } from './peer'
 
@@ -132,6 +132,7 @@ function installOfficialAttach(ctx: HostContext): void {
     events?: (request: { address?: { kind?: string, sessionId?: string } }, signal: AbortSignal) => Promise<unknown>
     cancel?: (request: { sessionId: string }, signal: AbortSignal) => Promise<unknown>
     projections?: (request: { sessionId: string }, signal: AbortSignal) => Promise<unknown>
+    rename?: (request: { sessionId: string, title: string }, signal: AbortSignal) => Promise<unknown>
     follow?: (request: { address?: { kind?: string, sessionId?: string } }, signal: AbortSignal) => AsyncIterable<unknown>
   } | undefined
   if (face === undefined || typeof face.list !== 'function' || typeof face.prompt !== 'function') return
@@ -139,6 +140,7 @@ function installOfficialAttach(ctx: HostContext): void {
   const originalPrompt = face.prompt.bind(face)
   const originalCancel = typeof face.cancel === 'function' ? face.cancel.bind(face) : undefined
   const originalProjections = typeof face.projections === 'function' ? face.projections.bind(face) : undefined
+  const originalRename = typeof face.rename === 'function' ? face.rename.bind(face) : undefined
   const originalFollow = typeof face.follow === 'function' ? face.follow.bind(face) : undefined
   console.error(`[dsh-ahoy] 官方会话列表会带上 ${peers.length} 个对方地址`)
   face.list = async (request, signal) => listWithPeers(await originalList(request, signal) as { items?: { sessionId: string }[] }, peers)
@@ -154,6 +156,13 @@ function installOfficialAttach(ctx: HostContext): void {
         return followRemote(sessionId, request, signal)
       }
       return originalFollow(request, signal)
+    }
+  }
+  if (originalRename !== undefined) {
+    face.rename = async (request, signal) => {
+      const forwarded = await renameRemote(request.sessionId, request.title)
+      if (forwarded !== undefined) return forwarded
+      return originalRename(request, signal)
     }
   }
   if (originalProjections !== undefined) {
@@ -188,6 +197,7 @@ function installOfficialAttach(ctx: HostContext): void {
     face.prompt = originalPrompt
     if (originalCancel !== undefined) face.cancel = originalCancel
     if (originalProjections !== undefined) face.projections = originalProjections
+    if (originalRename !== undefined) face.rename = originalRename
     if (originalFollow !== undefined) face.follow = originalFollow
     if (originalPage !== undefined) face.page = originalPage
     if (originalEvents !== undefined) face.events = originalEvents

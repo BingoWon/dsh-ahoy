@@ -101,6 +101,14 @@ export async function* followRemote(sessionId: string, request: Record<string, u
   }
 }
 
+export async function renameRemote(sessionId: string, title: string): Promise<unknown | undefined> {
+  const remote = parseRemoteSessionId(sessionId)
+  if (remote === undefined) return undefined
+  const value = await callPeer(remote.peer, 'rename', remote.sessionId, { title })
+  const encoded = JSON.stringify(value).split(remote.sessionId).join(sessionId)
+  return JSON.parse(encoded) as unknown
+}
+
 export async function projectionRemote(sessionId: string): Promise<unknown | undefined> {
   const remote = parseRemoteSessionId(sessionId)
   if (remote === undefined) return undefined
