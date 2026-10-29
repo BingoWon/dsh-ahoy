@@ -116,11 +116,12 @@ export function profileDirFromStack(stack: string | undefined): string | undefin
 }
 
 export function profileDirFromArgv(argv: readonly string[], home: string | undefined): string | undefined {
-  if (home === undefined || home === '') return undefined
-  const index = argv.indexOf('--profile')
-  const name = index >= 0 ? argv[index + 1] : undefined
-  if (name === undefined || name === '' || name.startsWith('-')) return undefined
-  return join(home, 'profiles', name)
+  if (home !== undefined && home !== '') {
+    const index = argv.indexOf('--profile')
+    const name = index >= 0 ? argv[index + 1] : undefined
+    if (name !== undefined && name !== '' && !name.startsWith('-')) return join(home, 'profiles', name)
+  }
+  return argv.find(arg => /\/\.dsh\/profiles\/[^/]+$/.test(arg))
 }
 
 export function loadPeerUrls(

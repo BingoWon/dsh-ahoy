@@ -31,4 +31,8 @@ test('env peers win, otherwise the profile file is used', () => {
     profileDirFromArgv(['dsh', '--profile', 'ahoy-a', '--port', '1'], '/Users/bingo/.dsh'),
     '/Users/bingo/.dsh/profiles/ahoy-a',
   )
+  assert.equal(
+    profileDirFromArgv(['DeepSeek Harness', '/Users/bingo/.dsh/profiles/desktop'], undefined),
+    '/Users/bingo/.dsh/profiles/desktop',
+  )
 })
