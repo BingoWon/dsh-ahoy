@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { ApprovalDesk } from './approval'
+import { PairDesk } from './pair'
 import { readMachineStatus, type MachineStatus } from './metrics'
 import { peerAuthHeader } from './peers'
 
@@ -63,21 +64,32 @@ export function acceptPeer(address: string, tokenConfigured: boolean): boolean {
   return tokenConfigured && address !== ''
 }
 
-function tokenMatches(request: IncomingMessage, expected: string | undefined, expiresAt?: number): boolean {
-  if (expiresAt !== undefined && Date.now() >= expiresAt) return false
-  if (expected === undefined || expected === '') return true
+function headerToken(request: IncomingMessage): string | undefined {
   const header = request.headers['x-ahoy-token']
   const got = Array.isArray(header) ? header[0] : header
-  if (typeof got !== 'string') return false
+  return typeof got === 'string' ? got : undefined
+}
+
+function sameToken(got: string, expected: string): boolean {
   const left = Buffer.from(got)
   const right = Buffer.from(expected)
   return left.length === right.length && timingSafeEqual(left, right)
 }
 
+function tokenMatches(request: IncomingMessage, expected: string | undefined, expiresAt: number | undefined, desk: PairDesk): boolean {
+  if (expiresAt !== undefined && Date.now() >= expiresAt) return false
+  const configured = expected !== undefined && expected !== ''
+  const got = headerToken(request)
+  if (got === undefined) return !configured && !desk.hasRedeemed()
+  if (configured && sameToken(got, expected)) return true
+  return desk.accepts(got)
+}
+
 /** 默认只绑本机。host 写成虚拟地址后，对方才能直接连过来。 */
-export function startPeer(port: number, sessions: SessionBridge, options?: { host?: string, token?: string, expiresAt?: number }): Promise<PeerHandle> {
+export function startPeer(port: number, sessions: SessionBridge, options?: { host?: string, token?: string, expiresAt?: number, desk?: PairDesk }): Promise<PeerHandle & { desk: PairDesk }> {
+  const desk = options?.desk ?? new PairDesk()
   const server: Server = createServer((request, response) => {
-    void handle(request, response, sessions, options?.token, options?.expiresAt)
+    void handle(request, response, sessions, options?.token, options?.expiresAt, desk)
   })
   return new Promise((resolve, reject) => {
     server.once('error', reject)
@@ -89,6 +101,7 @@ export function startPeer(port: number, sessions: SessionBridge, options?: { hos
       }
       resolve({
         port: (address as AddressInfo).port,
+        desk,
         close: () => new Promise((done, fail) => {
           server.close(error => error ? fail(error) : done())
         }),
@@ -97,14 +110,25 @@ export function startPeer(port: number, sessions: SessionBridge, options?: { hos
   })
 }
 
-async function handle(request: IncomingMessage, response: ServerResponse, sessions: SessionBridge, token?: string, expiresAt?: number): Promise<void> {
+async function handle(request: IncomingMessage, response: ServerResponse, sessions: SessionBridge, token: string | undefined, expiresAt: number | undefined, desk: PairDesk): Promise<void> {
+  if (request.url === '/v1/pair') {
+    try {
+      const body = JSON.parse(await readBody(request)) as { secret?: unknown }
+      if (typeof body.secret !== 'string') throw new Error('这个码不能再用')
+      sendJson(response, 200, desk.redeem(body.secret))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '这个码不能再用'
+      sendJson(response, 403, { error: message === '这个码不能再用' ? message : '这个码不能再用' })
+    }
+    return
+  }
   const address = remoteAddress(request)
-  const tokenConfigured = token !== undefined && token !== ''
+  const tokenConfigured = (token !== undefined && token !== '') || desk.hasRedeemed()
   if (!acceptPeer(address, tokenConfigured)) {
     sendJson(response, 403, { error: 'only loopback clients are accepted' })
     return
   }
-  if (!tokenMatches(request, token, expiresAt)) {
+  if (!tokenMatches(request, token, expiresAt, desk)) {
     sendJson(response, 403, { error: 'pairing token was rejected' })
     return
   }

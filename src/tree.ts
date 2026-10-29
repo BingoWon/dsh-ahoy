@@ -43,6 +43,21 @@ export interface MachineCard {
   error?: string
 }
 
+export interface CachedMachine extends MachineCard {
+  seenAt: number
+}
+
+/** 对方这次没连上时，沿用上次的会话列表，并标明这不是现在的状态。 */
+export function cardAfterFetch(cache: Map<string, CachedMachine>, peer: string, next: MachineCard, now: number): MachineCard {
+  if (next.error === undefined) {
+    cache.set(peer, { ...next, seenAt: now })
+    return next
+  }
+  const previous = cache.get(peer)
+  if (previous === undefined) return next
+  return { ...previous, peer, error: '这是缓存，不是现在' }
+}
+
 /** 把字节数收成卡片上的短数字。空值保持破折号，不假装读到了 0。 */
 export function formatBytes(value: number | null): string {
   if (value === null || !Number.isFinite(value) || value < 0) return '—'

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 export interface PeerRef {
@@ -70,6 +70,31 @@ export function listenEndpoint(envValue: string | undefined, fileText: string | 
 
 export function listenPort(envValue: string | undefined, fileText: string | undefined): number | undefined {
   return listenEndpoint(envValue, fileText)?.port
+}
+
+export function upsertPeer(fileText: string | undefined, peer: PeerRef): string {
+  const peers = peerRefs(undefined, fileText).filter(item => item.url !== peer.url)
+  peers.push(peer)
+  return `${JSON.stringify({ peers }, null, 2)}\n`
+}
+
+export function savePeerRef(
+  peer: PeerRef,
+  env: NodeJS.ProcessEnv = process.env,
+  argv: readonly string[] = process.argv,
+  stack: string | undefined = new Error().stack,
+): void {
+  const dir = env.DSH_PROFILE_DIR || profileDirFromArgv(argv, env.DSH_HOME) || profileDirFromStack(stack)
+  const path = peerConfigPath(dir)
+  if (path === undefined) throw new Error('这台机器没有 profile 目录')
+  let fileText: string | undefined
+  try {
+    fileText = readFileSync(path, 'utf8')
+  } catch {
+    fileText = undefined
+  }
+  writeFileSync(path, upsertPeer(fileText, peer))
+  setPeerToken(peer.url, peer.token)
 }
 
 export function peerConfigPath(profileDir: string | undefined): string | undefined {

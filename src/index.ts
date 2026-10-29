@@ -9,14 +9,17 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createAhoyTool } from './ahoy-tool'
 import { ApprovalDesk, isApprovalOutcome, sessionIdFromApproval } from './approval'
 import { attachmentRemote, cancelRemote, createOnPeer, followRemote, forkRemote, listWithPeers, modelRemote, pageRemote, projectionRemote, promptRemote, queueRemote, renameRemote, searchWithPeers } from './attach'
-import { loadListenEndpoint, loadPeerUrls } from './peers'
-import { peerForGroup } from './tree'
+import { PairDesk, redeemPairCode } from './pair'
+import { loadListenEndpoint, loadPeerUrls, savePeerRef } from './peers'
+import { cardAfterFetch, peerForGroup, type CachedMachine } from './tree'
 import { answerPeer, approvalsPeer, readPeer, sessionsFromHost, startPeer, type SessionBridge } from './peer'
 
 export { createAhoyTool, delegateToPeer, resolvePeer } from './ahoy-tool'
 export { setPeerToken } from './peers'
 export { ApprovalDesk, sessionIdFromApproval } from './approval'
 export { acceptPeer, answerPeer, approvalsPeer, pagePeer, promptPeer, readPeer, sessionsFromHost, startPeer } from './peer'
+export { readMachineStatus } from './metrics'
+export { PairDesk, readPairCode, redeemPairCode } from './pair'
 
 interface ToolsFace {
   register(tool: ReturnType<typeof createAhoyTool>): () => void
@@ -59,6 +62,89 @@ function peerList(): string[] {
   return loadPeerUrls()
 }
 
+const machineCache = new Map<string, CachedMachine>()
+
+function registerPairRoutes(ctx: HostContext, desk: PairDesk, listenUrl: () => string): void {
+  const webServer = optionalService<WebServer>(ctx, 'webServer')
+  if (webServer === undefined || typeof webServer.register !== 'function') return
+  const disposeCode = webServer.register({
+    kind: 'exact',
+    path: '/ahoy/pair-code',
+    handler(_request, response) {
+      const url = listenUrl()
+      if (url === '') {
+        response.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' })
+        response.end('还没有开始监听')
+        return
+      }
+      const body = JSON.stringify(desk.issue(url))
+      response.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+        'content-length': Buffer.byteLength(body),
+      })
+      response.end(body)
+    },
+  })
+  const disposePair = webServer.register({
+    kind: 'exact',
+    path: '/ahoy/pair',
+    handler(request, response) {
+      void (async () => {
+        try {
+          const raw = await readIncoming(request)
+          const payload = JSON.parse(raw) as { code?: unknown }
+          if (typeof payload.code !== 'string') throw new Error('这个码不能再用')
+          const paired = await redeemPairCode(payload.code)
+          savePeerRef({ url: paired.url, token: paired.token })
+          const body = JSON.stringify({ url: paired.url })
+          response.writeHead(200, {
+            'content-type': 'application/json; charset=utf-8',
+            'content-length': Buffer.byteLength(body),
+          })
+          response.end(body)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '这个码不能再用'
+          response.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' })
+          response.end(message)
+        }
+      })()
+    },
+  })
+  const disposeRevoke = webServer.register({
+    kind: 'exact',
+    path: '/ahoy/revoke',
+    handler(request, response) {
+      void (async () => {
+        try {
+          const payload = JSON.parse(await readIncoming(request)) as { token?: unknown }
+          if (typeof payload.token !== 'string') throw new Error('这个码不能再用')
+          desk.revoke(payload.token)
+          response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
+          response.end('{"revoked":true}')
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '这个码不能再用'
+          response.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' })
+          response.end(message)
+        }
+      })()
+    },
+  })
+  ctx.effect(() => () => {
+    disposeCode()
+    disposePair()
+    disposeRevoke()
+  }, 'dsh-ahoy: pair')
+}
+
+function readIncoming(request: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    request.on('data', (chunk: Buffer) => chunks.push(chunk))
+    request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    request.on('error', reject)
+  })
+}
+
 function registerTree(ctx: HostContext): void {
   const webServer = optionalService<WebServer>(ctx, 'webServer')
   if (webServer === undefined || typeof webServer.register !== 'function') return
@@ -79,10 +165,11 @@ function registerTree(ctx: HostContext): void {
         }[] = []
         const sessions: { peer: string, sessionId: string, title: string }[] = []
         for (const peer of peerList()) {
+          let next: CachedMachine
           try {
             const status = await readPeer(peer)
             const rows = status.sessions.map(session => ({ sessionId: session.sessionId, title: session.title }))
-            machines.push({
+            next = {
               peer,
               cpuPercent: status.cpuPercent,
               memoryUsedBytes: status.memoryUsedBytes,
@@ -90,11 +177,11 @@ function registerTree(ctx: HostContext): void {
               diskUsedBytes: status.diskUsedBytes,
               diskTotalBytes: status.diskTotalBytes,
               sessions: rows,
-            })
-            for (const session of rows) sessions.push({ peer, ...session })
+              seenAt: Date.now(),
+            }
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error)
-            machines.push({
+            next = {
               peer,
               cpuPercent: null,
               memoryUsedBytes: null,
@@ -102,8 +189,14 @@ function registerTree(ctx: HostContext): void {
               diskUsedBytes: null,
               diskTotalBytes: null,
               sessions: [],
+              seenAt: Date.now(),
               error: message,
-            })
+            }
+          }
+          const card = cardAfterFetch(machineCache, peer, next, Date.now())
+          machines.push(card)
+          if (card.error === undefined || card.error === '这是缓存，不是现在') {
+            for (const session of card.sessions) sessions.push({ peer, ...session })
           }
         }
         const body = JSON.stringify({ machines, sessions })
@@ -381,8 +474,11 @@ export function apply(ctx: HostContext): void {
   installApproval(ctx, desk)
   installOfficialAttach(ctx)
   const listen = loadListenEndpoint()
+  const pairDesk = new PairDesk()
+  let listenUrl = ''
   let closePeer: (() => Promise<void>) | undefined
   let stopped = false
+  registerPairRoutes(ctx, pairDesk, () => listenUrl)
   if (listen !== undefined) {
     const expiresText = process.env.DSH_AHOY_TOKEN_EXPIRES
     const expiresAt = expiresText !== undefined && expiresText !== '' ? Number(expiresText) : undefined
@@ -390,7 +486,9 @@ export function apply(ctx: HostContext): void {
       host: listen.host,
       token: process.env.DSH_AHOY_TOKEN,
       expiresAt: expiresAt !== undefined && Number.isFinite(expiresAt) ? expiresAt : undefined,
+      desk: pairDesk,
     }).then(handle => {
+      listenUrl = `http://${listen.host}:${handle.port}`
       if (stopped) {
         void handle.close()
         return

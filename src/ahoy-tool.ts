@@ -1,4 +1,4 @@
-import { promptPeer, readPeer } from './peer'
+import { createPeer, promptPeer, readPeer } from './peer'
 
 export interface AhoyRequest {
   peer: string
@@ -31,8 +31,8 @@ export function resolvePeer(requested: string | undefined, configured: readonly 
  */
 export async function delegateToPeer(request: AhoyRequest): Promise<AhoyResult> {
   const status = await readPeer(request.peer)
-  const sessionId = request.sessionId ?? status.sessions[0]?.sessionId
-  if (sessionId === undefined) throw new Error('对方没有可委派的会话')
+  let sessionId = request.sessionId ?? status.sessions[0]?.sessionId
+  if (sessionId === undefined) sessionId = (await createPeer(request.peer, {})).sessionId
   const result = await promptPeer(request.peer, sessionId, request.text)
   return {
     sessionId: result.sessionId,

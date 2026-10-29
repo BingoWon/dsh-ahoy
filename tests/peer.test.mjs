@@ -21,6 +21,26 @@ test('the ahoy tool uses the only paired machine and refuses an unknown one', as
     assert.equal(summary.includes('session-b'), true)
     assert.equal(summary.includes('工具'), false)
     assert.deepEqual(prompts, [{ sessionId: 'session-b', text: '看一下部署脚本' }])
+    const empty = await startPeer(0, {
+      async list() {
+        return []
+      },
+      async prompt(sessionId, text) {
+        prompts.push({ sessionId, text })
+        return { accepted: true, sessionId }
+      },
+      async create() {
+        return { sessionId: 'session-new' }
+      },
+    })
+    try {
+      const created = createAhoyTool(() => [`http://127.0.0.1:${empty.port}`])
+      const summary = await created.execute({ text: '读一下只在那边的文件' })
+      assert.equal(summary.includes('session-new'), true)
+      assert.equal(prompts.at(-1).sessionId, 'session-new')
+    } finally {
+      await empty.close()
+    }
   } finally {
     await peer.close()
   }
