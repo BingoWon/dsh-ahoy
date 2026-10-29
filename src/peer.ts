@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import type { ApprovalDesk } from './approval'
 import { readMachineStatus, type MachineStatus } from './metrics'
 import { peerAuthHeader } from './peers'
 
@@ -21,6 +22,8 @@ export interface SessionBridge {
   cancel?(sessionId: string): Promise<{ accepted: true }>
   call?(method: 'projections' | 'rename', sessionId: string, request: Record<string, unknown>): Promise<unknown>
   follow?(sessionId: string, request: Record<string, unknown>, signal: AbortSignal): AsyncIterable<unknown>
+  approvals?(): Promise<{ sessionId: string, toolName: string, reason?: string }[]>
+  answer?(sessionId: string, outcome: 'allowed-once' | 'rejected'): Promise<{ accepted: true }>
 }
 
 export interface PeerStatus extends MachineStatus {
@@ -174,6 +177,23 @@ async function handle(request: IncomingMessage, response: ServerResponse, sessio
       sendJson(response, 200, await sessions.cancel(body.sessionId))
       return
     }
+    if (request.url === '/v1/approvals') {
+      sendJson(response, 200, { items: await sessions.approvals?.() ?? [] })
+      return
+    }
+    if (request.url === '/v1/approval') {
+      if (sessions.answer === undefined) {
+        sendJson(response, 404, { error: 'approval is not available' })
+        return
+      }
+      const body = JSON.parse(await readBody(request)) as { sessionId?: unknown, outcome?: unknown }
+      if (typeof body.sessionId !== 'string' || (body.outcome !== 'allowed-once' && body.outcome !== 'rejected')) {
+        sendJson(response, 400, { error: 'sessionId and outcome are required' })
+        return
+      }
+      sendJson(response, 200, await sessions.answer(body.sessionId, body.outcome))
+      return
+    }
     if (request.url === '/v1/prompt') {
       const body = JSON.parse(await readBody(request)) as { sessionId?: unknown, text?: unknown }
       if (typeof body.sessionId !== 'string' || typeof body.text !== 'string' || body.text.trim() === '') {
@@ -257,6 +277,23 @@ export async function cancelPeer(baseUrl: string, sessionId: string): Promise<{ 
   return await response.json() as { accepted: true }
 }
 
+export async function approvalsPeer(baseUrl: string): Promise<{ sessionId: string, toolName: string, reason?: string }[]> {
+  const response = await fetch(new URL('/v1/approvals', baseUrl), { method: 'POST', headers: peerAuthHeader(baseUrl) })
+  if (!response.ok) throw new Error(`peer approvals failed: ${response.status}`)
+  const body = await response.json() as { items?: { sessionId: string, toolName: string, reason?: string }[] }
+  return body.items ?? []
+}
+
+export async function answerPeer(baseUrl: string, sessionId: string, outcome: 'allowed-once' | 'rejected'): Promise<{ accepted: true }> {
+  const response = await fetch(new URL('/v1/approval', baseUrl), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...peerAuthHeader(baseUrl) },
+    body: JSON.stringify({ sessionId, outcome }),
+  })
+  if (!response.ok) throw new Error(`peer approval failed: ${response.status}`)
+  return await response.json() as { accepted: true }
+}
+
 export async function promptPeer(baseUrl: string, sessionId: string, text: string): Promise<PromptResult> {
   const response = await fetch(new URL('/v1/prompt', baseUrl), {
     method: 'POST',
@@ -289,7 +326,7 @@ interface HostWithSessions {
 }
 
 /** 对方插件调用它所在的那台 DSH。没有会话服务时列表为空，送消息会失败。 */
-export function sessionsFromHost(ctx: HostWithSessions): SessionBridge {
+export function sessionsFromHost(ctx: HostWithSessions, desk?: ApprovalDesk): SessionBridge {
   const controller = (typeof ctx.get === 'function' ? ctx.get('sessionController') : undefined) ?? ctx.sessionController
   const face = controller as SessionControllerLike | undefined
   const list = face !== undefined && typeof face.list === 'function' ? face.list.bind(face) : undefined
@@ -341,6 +378,13 @@ export function sessionsFromHost(ctx: HostWithSessions): SessionBridge {
     async page(sessionId, request) {
       if (page === undefined) throw new Error('这台 DSH 没有历史接口')
       return await page({ ...request, address: { kind: 'session', sessionId } }, new AbortController().signal)
+    },
+    async approvals() {
+      return desk?.list() ?? []
+    },
+    async answer(sessionId, outcome) {
+      if (desk === undefined || !desk.answer(sessionId, outcome)) throw new Error('没有等待中的审批')
+      return { accepted: true }
     },
   }
 }

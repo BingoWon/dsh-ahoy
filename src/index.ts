@@ -7,13 +7,15 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createAhoyTool } from './ahoy-tool'
+import { ApprovalDesk, isApprovalOutcome, sessionIdFromApproval } from './approval'
 import { cancelRemote, followRemote, listWithPeers, pageRemote, projectionRemote, promptRemote } from './attach'
 import { loadListenPort, loadPeerUrls } from './peers'
-import { readPeer, sessionsFromHost, startPeer, type SessionBridge } from './peer'
+import { answerPeer, approvalsPeer, readPeer, sessionsFromHost, startPeer, type SessionBridge } from './peer'
 
 export { createAhoyTool, delegateToPeer, resolvePeer } from './ahoy-tool'
 export { setPeerToken } from './peers'
-export { pagePeer, promptPeer, readPeer, sessionsFromHost, startPeer } from './peer'
+export { ApprovalDesk, sessionIdFromApproval } from './approval'
+export { answerPeer, approvalsPeer, pagePeer, promptPeer, readPeer, sessionsFromHost, startPeer } from './peer'
 
 interface ToolsFace {
   register(tool: ReturnType<typeof createAhoyTool>): () => void
@@ -27,9 +29,16 @@ interface WebServer {
   }): () => void
 }
 
+interface ApprovalRequest {
+  toolName?: unknown
+  reason?: unknown
+  agent?: { session?: { id?: unknown, header?: { id?: unknown } } }
+}
+
 interface HostContext {
   effect(dispose: () => void, label: string): void
   get?(name: string): unknown
+  on?(event: string, listener: (this: unknown, request: ApprovalRequest, next: () => unknown) => unknown): () => void
   tools?: ToolsFace
   webServer?: WebServer
   sessionController?: Parameters<typeof sessionsFromHost>[0]['sessionController']
@@ -185,9 +194,84 @@ function installOfficialAttach(ctx: HostContext): void {
   }, 'dsh-ahoy: attach')
 }
 
+function installApproval(ctx: HostContext, desk: ApprovalDesk): void {
+  if (typeof ctx.on !== 'function') return
+  try {
+    const dispose = ctx.on('approval/request', function(request, next) {
+      const sessionId = sessionIdFromApproval(request)
+      if (sessionId === undefined) return next()
+      return desk.decide(sessionId, {
+        toolName: typeof request.toolName === 'string' ? request.toolName : '',
+        ...typeof request.reason === 'string' ? { reason: request.reason } : {},
+      }, next)
+    })
+    if (typeof dispose === 'function') ctx.effect(() => dispose, 'dsh-ahoy: approval')
+  } catch (error) {
+    console.error('[dsh-ahoy] 没有接上审批:', error)
+  }
+}
+
+function registerApprovalRoute(ctx: HostContext): void {
+  const webServer = optionalService<WebServer>(ctx, 'webServer')
+  if (webServer === undefined || typeof webServer.register !== 'function') return
+  const dispose = webServer.register({
+    kind: 'exact',
+    path: '/ahoy/approvals',
+    handler(request, response) {
+      void (async () => {
+        if (request.method === 'GET') {
+          const items = []
+          for (const peer of peerList()) {
+            try {
+              for (const item of await approvalsPeer(peer)) items.push({ peer, ...item })
+            } catch {
+              // 对方没开审批接口时不挡住机器列表。
+            }
+          }
+          const body = JSON.stringify({ items })
+          response.writeHead(200, {
+            'content-type': 'application/json; charset=utf-8',
+            'content-length': Buffer.byteLength(body),
+          })
+          response.end(body)
+          return
+        }
+        const chunks: Buffer[] = []
+        for await (const chunk of request) chunks.push(Buffer.from(chunk))
+        const payload = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { peer?: unknown, sessionId?: unknown, outcome?: unknown }
+        if (typeof payload.peer !== 'string' || typeof payload.sessionId !== 'string' || !isApprovalOutcome(payload.outcome)) {
+          response.writeHead(400)
+          response.end('bad request')
+          return
+        }
+        if (!peerList().includes(payload.peer)) {
+          response.writeHead(403)
+          response.end('peer is not paired')
+          return
+        }
+        const result = await answerPeer(payload.peer, payload.sessionId, payload.outcome)
+        const body = JSON.stringify(result)
+        response.writeHead(200, {
+          'content-type': 'application/json; charset=utf-8',
+          'content-length': Buffer.byteLength(body),
+        })
+        response.end(body)
+      })().catch(error => {
+        const message = error instanceof Error ? error.message : String(error)
+        response.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
+        response.end(message)
+      })
+    },
+  })
+  ctx.effect(() => dispose, 'dsh-ahoy: approval-route')
+}
+
 export function apply(ctx: HostContext): void {
+  const desk = new ApprovalDesk()
   registerTree(ctx)
-  const bridge: SessionBridge = sessionsFromHost(ctx)
+  registerApprovalRoute(ctx)
+  const bridge: SessionBridge = sessionsFromHost(ctx, desk)
+  installApproval(ctx, desk)
   installOfficialAttach(ctx)
   const port = loadListenPort()
   let closePeer: (() => Promise<void>) | undefined

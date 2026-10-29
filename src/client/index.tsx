@@ -83,11 +83,59 @@ function machineLine(machine: MachineCard): string {
   return `CPU ${cpu} · 内存 ${formatBytes(machine.memoryUsedBytes)} / ${formatBytes(machine.memoryTotalBytes)} · 磁盘 ${formatBytes(machine.diskUsedBytes)} / ${formatBytes(machine.diskTotalBytes)}`
 }
 
+interface RemoteApproval {
+  peer: string
+  sessionId: string
+  toolName: string
+  reason?: string
+}
+
+function useApprovals(): RemoteApproval[] {
+  const [items, setItems] = useState<RemoteApproval[]>([])
+  useEffect(() => {
+    let stopped = false
+    const tick = async (): Promise<void> => {
+      try {
+        const response = await fetch('/ahoy/approvals')
+        if (!response.ok) return
+        const body = await response.json() as { items?: RemoteApproval[] }
+        if (!stopped) setItems(Array.isArray(body.items) ? body.items : [])
+      } catch {
+        // 路由还没挂上时不显示审批。
+      }
+    }
+    void tick()
+    const timer = setInterval(() => { void tick() }, 2000)
+    return () => {
+      stopped = true
+      clearInterval(timer)
+    }
+  }, [])
+  return items
+}
+
+function decide(item: RemoteApproval, outcome: 'allowed-once' | 'rejected'): void {
+  void fetch('/ahoy/approvals', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ peer: item.peer, sessionId: item.sessionId, outcome }),
+  })
+}
+
 function MachineList({ sessions }: { sessions?: OfficialSessions }): ReactNode {
   const text = dictionary()
   const { machines } = useRemoteSessions(sessions)
+  const approvals = useApprovals()
   return h('section', { style: { padding: '16px', lineHeight: 1.5 } },
     h('h2', { style: { margin: '0 0 8px', fontSize: '16px' } }, text.title),
+    approvals.map(item => h('article', {
+      key: `${item.peer}:${item.sessionId}`,
+      style: { marginBottom: '12px' },
+    },
+    h('p', { style: { margin: '0 0 8px' } }, `${item.toolName || '审批'} · ${item.reason ?? item.sessionId}`),
+    h('button', { type: 'button', onClick: () => decide(item, 'allowed-once') }, '允许一次'),
+    h('button', { type: 'button', onClick: () => decide(item, 'rejected'), style: { marginLeft: '8px' } }, '拒绝'),
+    )),
     machines.length === 0
       ? h('p', { style: { margin: 0 } }, text.empty)
       : machines.map(machine => h('article', {
