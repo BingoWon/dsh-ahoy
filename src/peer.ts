@@ -134,20 +134,22 @@ interface HostWithSessions {
 export function sessionsFromHost(ctx: HostWithSessions): SessionBridge {
   const controller = (typeof ctx.get === 'function' ? ctx.get('sessionController') : undefined) ?? ctx.sessionController
   const face = controller as SessionControllerLike | undefined
+  const list = face !== undefined && typeof face.list === 'function' ? face.list.bind(face) : undefined
+  const prompt = face !== undefined && typeof face.prompt === 'function' ? face.prompt.bind(face) : undefined
   return {
     async list() {
-      if (face === undefined || typeof face.list !== 'function') return []
-      const value = await face.list({}, new AbortController().signal)
+      if (list === undefined) return []
+      const value = await list({}, new AbortController().signal)
       return (value.items ?? []).flatMap(item => {
         if (typeof item.sessionId !== 'string') return []
         return [{ sessionId: item.sessionId, title: typeof item.title === 'string' ? item.title : item.sessionId }]
       })
     },
     async prompt(sessionId, text) {
-      if (face === undefined || typeof face.prompt !== 'function') {
+      if (prompt === undefined) {
         throw new Error('这台 DSH 没有会话接口')
       }
-      await face.prompt({
+      await prompt({
         sessionId,
         content: [{ type: 'text', text }],
         mode: 'queue',

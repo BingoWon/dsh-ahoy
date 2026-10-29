@@ -6,6 +6,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { ahoyTool } from './ahoy-tool'
+import { listWithPeers, promptRemote } from './attach'
 import { readPeer, sessionsFromHost, startPeer, type SessionBridge } from './peer'
 
 export { delegateToPeer } from './ahoy-tool'
@@ -84,8 +85,34 @@ export const name = 'dsh-ahoy'
 /** 会话服务和工具服务都到齐后再启动。Cordis 不允许读取没有声明的服务。 */
 export const inject = ['sessionController', 'tools']
 
+function installOfficialAttach(ctx: HostContext): void {
+  const peers = peerList()
+  if (peers.length === 0) return
+  const controller = (typeof ctx.get === 'function' ? ctx.get('sessionController') : undefined) ?? ctx.sessionController
+  const face = controller as {
+    list?: (request: unknown, signal: AbortSignal) => Promise<{ items?: readonly { sessionId?: string }[] }>
+    prompt?: (request: { sessionId: string, content?: readonly { type?: string, text?: string }[] }, signal: AbortSignal) => Promise<unknown>
+  } | undefined
+  if (face === undefined || typeof face.list !== 'function' || typeof face.prompt !== 'function') return
+  const originalList = face.list.bind(face)
+  const originalPrompt = face.prompt.bind(face)
+  console.error(`[dsh-ahoy] 官方会话列表会带上 ${peers.length} 个对方地址`)
+  face.list = async (request, signal) => listWithPeers(await originalList(request, signal) as { items?: { sessionId: string }[] }, peers)
+  face.prompt = async (request, signal) => {
+    const forwarded = await promptRemote(request)
+    if (forwarded !== undefined) return forwarded
+    return originalPrompt(request, signal)
+  }
+  ctx.effect(() => () => {
+    face.list = originalList
+    face.prompt = originalPrompt
+  }, 'dsh-ahoy: attach')
+}
+
 export function apply(ctx: HostContext): void {
   registerTree(ctx)
+  const bridge: SessionBridge = sessionsFromHost(ctx)
+  installOfficialAttach(ctx)
   const listen = process.env.DSH_AHOY_LISTEN
   let closePeer: (() => Promise<void>) | undefined
   let stopped = false
@@ -94,8 +121,7 @@ export function apply(ctx: HostContext): void {
     if (!Number.isInteger(port) || port < 0 || port > 65535) {
       throw new Error(`DSH_AHOY_LISTEN 不是端口: ${listen}`)
     }
-    const sessions: SessionBridge = sessionsFromHost(ctx)
-    void startPeer(port, sessions).then(handle => {
+    void startPeer(port, bridge).then(handle => {
       if (stopped) {
         void handle.close()
         return
