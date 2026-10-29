@@ -3,7 +3,7 @@
  * 桌面应用加载的是同一套客户端。
  */
 import { createElement as h, useEffect, useState, type ReactNode } from 'react'
-import { formatBytes, framesForNewSessions, type MachineCard, type TreeSession } from '../tree'
+import { formatBytes, framesForNewSessions, remoteSessionId, type MachineCard, type TreeSession } from '../tree'
 
 const NS = 'dsh-ahoy'
 const announced = new Set<string>()
@@ -122,7 +122,7 @@ function decide(item: RemoteApproval, outcome: 'allowed-once' | 'rejected'): voi
   })
 }
 
-function MachineList({ sessions }: { sessions?: OfficialSessions }): ReactNode {
+function MachineList({ sessions, openSession }: { sessions?: OfficialSessions, openSession: (sessionId: string) => void }): ReactNode {
   const text = dictionary()
   const { machines } = useRemoteSessions(sessions)
   const approvals = useApprovals()
@@ -145,7 +145,14 @@ function MachineList({ sessions }: { sessions?: OfficialSessions }): ReactNode {
       h('strong', null, machine.peer),
       h('p', { style: { margin: '4px 0' } }, machineLine(machine)),
       machine.sessions.length === 0 ? null : h('ul', { style: { margin: 0, paddingLeft: '18px' } },
-        machine.sessions.map(session => h('li', { key: session.sessionId }, session.title))),
+        machine.sessions.map(session => h('li', { key: session.sessionId },
+          h('button', {
+            type: 'button',
+            onClick: () => openSession(remoteSessionId(machine.peer, session.sessionId)),
+            style: { background: 'none', border: 0, padding: 0, color: 'inherit', cursor: 'pointer', textDecoration: 'underline' },
+          }, session.title),
+        )),
+      ),
       )),
   )
 }
@@ -163,6 +170,7 @@ interface SlotOptions {
 interface ClientContext {
   effect(dispose: () => void, label: string): void
   sessions?: OfficialSessions
+  uiWorkspace?: { openSession?: (target: string) => void }
   locale: {
     register(namespace: string, dictionaries: { zh: Dict, en: Dict }): () => void
     bind(namespace: string): (key: keyof Dict) => string
@@ -176,7 +184,10 @@ interface ClientContext {
 function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-ahoy: dictionaries')
   const t = ctx.locale.bind(NS)
-  const page = (props: { sessions?: OfficialSessions }): ReactNode => h(MachineList, props)
+  const page = (props: { sessions?: OfficialSessions }): ReactNode => h(MachineList, {
+    ...props,
+    openSession: (sessionId) => ctx.uiWorkspace?.openSession?.(sessionId),
+  })
   ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
     name: 'settings.plugins.tab',
     id: 'dsh-ahoy',
@@ -202,6 +213,6 @@ function apply(ctx: ClientContext): void {
 
 module.exports = {
   name: 'dsh-ahoy',
-  inject: ['slots', 'locale', 'sessions'],
+  inject: ['slots', 'locale', 'sessions', 'uiWorkspace'],
   apply,
 }
