@@ -218,7 +218,7 @@ interface ClientContext {
   sessions?: OfficialSessions
   uiWorkspace?: { openSession?: (target: string) => void }
   remote?: { session?: { modelCatalog?: () => Promise<unknown> } }
-  models?: {
+  modelDirectories?: {
     directoryFor?: (sessionId: string) => { load?: () => Promise<unknown>, __ahoyWrapped?: boolean }
   }
   locale: {
@@ -231,7 +231,7 @@ interface ClientContext {
   }
 }
 
-function optionalService<T>(ctx: ClientContext, name: 'remote' | 'models' | 'uiWorkspace'): T | undefined {
+function optionalService<T>(ctx: ClientContext, name: 'remote' | 'modelDirectories' | 'uiWorkspace'): T | undefined {
   try {
     return ctx[name] as T | undefined
   } catch {
@@ -239,16 +239,38 @@ function optionalService<T>(ctx: ClientContext, name: 'remote' | 'models' | 'uiW
   }
 }
 
+function runnableCatalog(catalog: unknown): unknown {
+  const models = usableModels(catalog)
+  if (models.length === 0 || catalog === null || typeof catalog !== 'object') return undefined
+  const record = catalog as { groups?: unknown, routableProviders?: unknown }
+  const allowed = new Set(models.map(model => model.provider))
+  const chosen = new Set(models.map(model => `${model.provider}\n${model.id}`))
+  const groups = Array.isArray(record.groups) ? record.groups.flatMap(group => {
+    if (group === null || typeof group !== 'object') return []
+    const provider = (group as { id?: unknown }).id
+    if (typeof provider !== 'string' || !allowed.has(provider)) return []
+    const listed = (group as { models?: unknown }).models
+    if (!Array.isArray(listed)) return []
+    const next = listed.filter(model => {
+      if (model === null || typeof model !== 'object') return false
+      const id = (model as { id?: unknown }).id
+      return typeof id === 'string' && chosen.has(`${provider}\n${id}`)
+    })
+    return next.length === 0 ? [] : [{ ...(group as Record<string, unknown>), models: next }]
+  }) : []
+  return { ...record, routableProviders: [...allowed], groups }
+}
+
 function installRemoteModelCatalog(ctx: ClientContext): void {
   let remoteSession: { modelCatalog?: () => Promise<unknown> } | undefined
-  let models: ClientContext['models']
+  let directories: ClientContext['modelDirectories']
   try {
     remoteSession = optionalService<{ session?: { modelCatalog?: () => Promise<unknown> } }>(ctx, 'remote')?.session
-    models = optionalService<NonNullable<ClientContext['models']>>(ctx, 'models')
+    directories = optionalService<NonNullable<ClientContext['modelDirectories']>>(ctx, 'modelDirectories')
   } catch {
     return
   }
-  if (remoteSession === undefined || typeof remoteSession.modelCatalog !== 'function' || models === undefined || typeof models.directoryFor !== 'function') return
+  if (remoteSession === undefined || typeof remoteSession.modelCatalog !== 'function' || directories === undefined || typeof directories.directoryFor !== 'function') return
   let catalogSession: string | undefined
   const originalCatalog = remoteSession.modelCatalog.bind(remoteSession)
   remoteSession.modelCatalog = () => {
@@ -264,12 +286,13 @@ function installRemoteModelCatalog(ctx: ClientContext): void {
       })
       if (!response.ok) return { ok: false, error: { code: 'ahoy', message: NO_MODEL } }
       const value: unknown = await response.json()
-      if (usableModels(value).length === 0) return { ok: false, error: { code: 'ahoy', message: NO_MODEL } }
-      return { ok: true, value }
+      const runnable = runnableCatalog(value)
+      if (runnable === undefined) return { ok: false, error: { code: 'ahoy', message: NO_MODEL } }
+      return { ok: true, value: runnable }
     })()
   }
-  const originalDirectory = models.directoryFor.bind(models)
-  models.directoryFor = (sessionId) => {
+  const originalDirectory = directories.directoryFor.bind(directories)
+  directories.directoryFor = (sessionId: string) => {
     const directory = originalDirectory(sessionId)
     if (!sessionId.startsWith('ahoy:') || directory.__ahoyWrapped === true || typeof directory.load !== 'function') return directory
     const load = directory.load.bind(directory)
@@ -329,6 +352,6 @@ function apply(ctx: ClientContext): void {
 
 module.exports = {
   name: 'dsh-ahoy',
-  inject: ['slots', 'locale', 'sessions'],
+  inject: ['slots', 'locale', 'sessions', 'remote', 'remote.session', 'modelDirectories'],
   apply,
 }
