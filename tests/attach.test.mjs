@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { cancelRemote, followRemote, listWithPeers, pageRemote, parseRemoteSessionId, projectionRemote, promptRemote, queueRemote, renameRemote } from '../lib/attach.js'
+import { cancelRemote, followRemote, listWithPeers, modelRemote, pageRemote, parseRemoteSessionId, projectionRemote, promptRemote, queueRemote, renameRemote } from '../lib/attach.js'
 import { startPeer } from '../lib/index.js'
 import { machineGroupPath, remoteSessionId } from '../lib/tree.js'
 
@@ -53,6 +53,9 @@ test('official list gains the peer session and a prompt goes to that peer', asyn
     assert.deepEqual(cancels, ['session-b'])
     const projection = await projectionRemote(remoteId)
     assert.equal(projection.values.title, '部署脚本')
+    const selected = await modelRemote(remoteId, { provider: 'ss', model: 'deepseek-v4-flash' })
+    assert.equal(selected.method, 'selectModel')
+    assert.equal(selected.sessionId, remoteId)
     const queued = await queueRemote(remoteId, { itemId: 'item-1', action: { kind: 'remove' } })
     assert.equal(queued.method, 'updateQueue')
     assert.equal(queued.sessionId, remoteId)

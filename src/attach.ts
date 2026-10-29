@@ -101,6 +101,14 @@ export async function* followRemote(sessionId: string, request: Record<string, u
   }
 }
 
+export async function modelRemote(sessionId: string, request: Record<string, unknown>): Promise<unknown | undefined> {
+  const remote = parseRemoteSessionId(sessionId)
+  if (remote === undefined) return undefined
+  const value = await callPeer(remote.peer, 'selectModel', remote.sessionId, request)
+  const encoded = JSON.stringify(value).split(remote.sessionId).join(sessionId)
+  return JSON.parse(encoded) as unknown
+}
+
 export async function queueRemote(sessionId: string, request: Record<string, unknown>): Promise<unknown | undefined> {
   const remote = parseRemoteSessionId(sessionId)
   if (remote === undefined) return undefined
