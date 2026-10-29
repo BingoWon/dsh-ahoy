@@ -1,4 +1,4 @@
-import { pagePeer, promptPeer, readPeer, type RemoteSession } from './peer'
+import { cancelPeer, pagePeer, promptPeer, readPeer, type RemoteSession } from './peer'
 import { remoteSessionId } from './tree'
 
 export interface ListedSession {
@@ -84,6 +84,12 @@ export async function promptRemote(request: PromptRequest): Promise<{ accepted: 
 }
 
 /** 用对方的原始会话读历史，再把记录里的标识换回官方树上的 ahoy: 标识。 */
+export async function cancelRemote(sessionId: string): Promise<{ accepted: true } | undefined> {
+  const remote = parseRemoteSessionId(sessionId)
+  if (remote === undefined) return undefined
+  return await cancelPeer(remote.peer, remote.sessionId)
+}
+
 export async function pageRemote(sessionId: string, request: Record<string, unknown>): Promise<unknown | undefined> {
   const remote = parseRemoteSessionId(sessionId)
   if (remote === undefined) return undefined

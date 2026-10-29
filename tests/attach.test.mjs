@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { listWithPeers, pageRemote, parseRemoteSessionId, promptRemote } from '../lib/attach.js'
+import { cancelRemote, listWithPeers, pageRemote, parseRemoteSessionId, promptRemote } from '../lib/attach.js'
 import { startPeer } from '../lib/index.js'
 import { remoteSessionId } from '../lib/tree.js'
 
 test('official list gains the peer session and a prompt goes to that peer', async () => {
   const prompts = []
+  const cancels = []
   const peer = await startPeer(0, {
     async list() {
       return [{ sessionId: 'session-b', title: '部署脚本' }, { sessionId: 'ahoy:already', title: '跳过' }]
@@ -13,6 +14,10 @@ test('official list gains the peer session and a prompt goes to that peer', asyn
     async prompt(sessionId, text) {
       prompts.push({ sessionId, text })
       return { accepted: true, sessionId }
+    },
+    async cancel(sessionId) {
+      cancels.push(sessionId)
+      return { accepted: true }
     },
     async page(sessionId) {
       return { records: [{ sessionId, text: '部署脚本' }], cursor: 1 }
@@ -37,6 +42,9 @@ test('official list gains the peer session and a prompt goes to that peer', asyn
     const page = await pageRemote(remoteId, { maxMessages: 20 })
     assert.equal(page.records[0].sessionId, remoteId)
     assert.equal(page.records[0].text, '部署脚本')
+    assert.deepEqual(await cancelRemote(remoteId), { accepted: true })
+    assert.deepEqual(cancels, ['session-b'])
+    assert.equal(await cancelRemote('session-a'), undefined)
   } finally {
     await peer.close()
   }

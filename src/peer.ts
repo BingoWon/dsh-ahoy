@@ -16,6 +16,7 @@ export interface SessionBridge {
   list(): Promise<RemoteSession[]>
   prompt(sessionId: string, text: string): Promise<PromptResult>
   page?(sessionId: string, request: Record<string, unknown>): Promise<unknown>
+  cancel?(sessionId: string): Promise<{ accepted: true }>
 }
 
 export interface PeerStatus extends MachineStatus {
@@ -98,6 +99,19 @@ async function handle(request: IncomingMessage, response: ServerResponse, sessio
       sendJson(response, 200, await sessions.page(body.sessionId, body.request as Record<string, unknown>))
       return
     }
+    if (request.url === '/v1/cancel') {
+      if (sessions.cancel === undefined) {
+        sendJson(response, 404, { error: 'cancel is not available' })
+        return
+      }
+      const body = JSON.parse(await readBody(request)) as { sessionId?: unknown }
+      if (typeof body.sessionId !== 'string' || body.sessionId === '') {
+        sendJson(response, 400, { error: 'sessionId is required' })
+        return
+      }
+      sendJson(response, 200, await sessions.cancel(body.sessionId))
+      return
+    }
     if (request.url === '/v1/prompt') {
       const body = JSON.parse(await readBody(request)) as { sessionId?: unknown, text?: unknown }
       if (typeof body.sessionId !== 'string' || typeof body.text !== 'string' || body.text.trim() === '') {
@@ -129,6 +143,20 @@ export async function pagePeer(baseUrl: string, sessionId: string, request: Reco
   return await response.json()
 }
 
+export async function cancelPeer(baseUrl: string, sessionId: string): Promise<{ accepted: true }> {
+  const response = await fetch(new URL('/v1/cancel', baseUrl), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionId }),
+  })
+  if (!response.ok) {
+    const body = await response.json().catch(() => undefined) as { error?: unknown } | undefined
+    const message = typeof body?.error === 'string' ? body.error : `peer cancel failed: ${response.status}`
+    throw new Error(message)
+  }
+  return await response.json() as { accepted: true }
+}
+
 export async function promptPeer(baseUrl: string, sessionId: string, text: string): Promise<PromptResult> {
   const response = await fetch(new URL('/v1/prompt', baseUrl), {
     method: 'POST',
@@ -149,6 +177,7 @@ interface SessionControllerLike {
   }, signal: AbortSignal): Promise<unknown>
   page?(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>
   events?(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>
+  cancel?(request: { sessionId: string }, signal: AbortSignal): Promise<unknown>
 }
 
 interface HostWithSessions {
@@ -162,6 +191,7 @@ export function sessionsFromHost(ctx: HostWithSessions): SessionBridge {
   const face = controller as SessionControllerLike | undefined
   const list = face !== undefined && typeof face.list === 'function' ? face.list.bind(face) : undefined
   const prompt = face !== undefined && typeof face.prompt === 'function' ? face.prompt.bind(face) : undefined
+  const cancel = face !== undefined && typeof face.cancel === 'function' ? face.cancel.bind(face) : undefined
   const page = face !== undefined && typeof face.page === 'function'
     ? face.page.bind(face)
     : face !== undefined && typeof face.events === 'function'
@@ -187,6 +217,11 @@ export function sessionsFromHost(ctx: HostWithSessions): SessionBridge {
         requestId: crypto.randomUUID(),
       }, new AbortController().signal)
       return { accepted: true, sessionId }
+    },
+    async cancel(sessionId) {
+      if (cancel === undefined) throw new Error('这台 DSH 没有取消接口')
+      await cancel({ sessionId }, new AbortController().signal)
+      return { accepted: true }
     },
     async page(sessionId, request) {
       if (page === undefined) throw new Error('这台 DSH 没有历史接口')

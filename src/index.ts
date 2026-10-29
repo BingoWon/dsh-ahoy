@@ -7,7 +7,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { ahoyTool } from './ahoy-tool'
-import { listWithPeers, pageRemote, promptRemote } from './attach'
+import { cancelRemote, listWithPeers, pageRemote, promptRemote } from './attach'
 import { loadPeerUrls } from './peers'
 import { readPeer, sessionsFromHost, startPeer, type SessionBridge } from './peer'
 
@@ -120,16 +120,25 @@ function installOfficialAttach(ctx: HostContext): void {
     prompt?: (request: { sessionId: string, content?: readonly { type?: string, text?: string }[] }, signal: AbortSignal) => Promise<unknown>
     page?: (request: { address?: { kind?: string, sessionId?: string } }, signal: AbortSignal) => Promise<unknown>
     events?: (request: { address?: { kind?: string, sessionId?: string } }, signal: AbortSignal) => Promise<unknown>
+    cancel?: (request: { sessionId: string }, signal: AbortSignal) => Promise<unknown>
   } | undefined
   if (face === undefined || typeof face.list !== 'function' || typeof face.prompt !== 'function') return
   const originalList = face.list.bind(face)
   const originalPrompt = face.prompt.bind(face)
+  const originalCancel = typeof face.cancel === 'function' ? face.cancel.bind(face) : undefined
   console.error(`[dsh-ahoy] 官方会话列表会带上 ${peers.length} 个对方地址`)
   face.list = async (request, signal) => listWithPeers(await originalList(request, signal) as { items?: { sessionId: string }[] }, peers)
   face.prompt = async (request, signal) => {
     const forwarded = await promptRemote(request)
     if (forwarded !== undefined) return forwarded
     return originalPrompt(request, signal)
+  }
+  if (originalCancel !== undefined) {
+    face.cancel = async (request, signal) => {
+      const forwarded = await cancelRemote(request.sessionId)
+      if (forwarded !== undefined) return forwarded
+      return originalCancel(request, signal)
+    }
   }
   const wrapPage = (original: (request: { address?: { kind?: string, sessionId?: string } }, signal: AbortSignal) => Promise<unknown>) =>
     async (request: { address?: { kind?: string, sessionId?: string } }, signal: AbortSignal) => {
@@ -147,6 +156,7 @@ function installOfficialAttach(ctx: HostContext): void {
   ctx.effect(() => () => {
     face.list = originalList
     face.prompt = originalPrompt
+    if (originalCancel !== undefined) face.cancel = originalCancel
     if (originalPage !== undefined) face.page = originalPage
     if (originalEvents !== undefined) face.events = originalEvents
   }, 'dsh-ahoy: attach')
