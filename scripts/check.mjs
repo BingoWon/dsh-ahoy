@@ -20,5 +20,8 @@ if (!client.includes('window.__ModuleLoader__.load') || !client.includes('id: "d
   throw new Error('client bundle is missing the module loader handshake')
 }
 if (!client.includes('还没有配对的机器')) throw new Error('client bundle is missing the empty machine list')
+if (!client.includes('conversation.composer') || !client.includes('允许一次')) {
+  throw new Error('client bundle is missing the composer approval bar')
+}
 
 console.log('dsh-ahoy skeleton ok')
