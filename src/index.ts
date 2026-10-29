@@ -8,7 +8,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createAhoyTool } from './ahoy-tool'
 import { cancelRemote, followRemote, listWithPeers, pageRemote, projectionRemote, promptRemote } from './attach'
-import { loadPeerUrls } from './peers'
+import { loadListenPort, loadPeerUrls } from './peers'
 import { readPeer, sessionsFromHost, startPeer, type SessionBridge } from './peer'
 
 export { createAhoyTool, delegateToPeer, resolvePeer } from './ahoy-tool'
@@ -189,20 +189,16 @@ export function apply(ctx: HostContext): void {
   registerTree(ctx)
   const bridge: SessionBridge = sessionsFromHost(ctx)
   installOfficialAttach(ctx)
-  const listen = process.env.DSH_AHOY_LISTEN
+  const port = loadListenPort()
   let closePeer: (() => Promise<void>) | undefined
   let stopped = false
-  if (listen !== undefined && listen !== '') {
-    const port = Number(listen)
-    if (!Number.isInteger(port) || port < 0 || port > 65535) {
-      throw new Error(`DSH_AHOY_LISTEN 不是端口: ${listen}`)
-    }
+  if (port !== undefined) {
     const expiresText = process.env.DSH_AHOY_TOKEN_EXPIRES
-  const expiresAt = expiresText !== undefined && expiresText !== '' ? Number(expiresText) : undefined
-  void startPeer(port, bridge, {
-    token: process.env.DSH_AHOY_TOKEN,
-    expiresAt: expiresAt !== undefined && Number.isFinite(expiresAt) ? expiresAt : undefined,
-  }).then(handle => {
+    const expiresAt = expiresText !== undefined && expiresText !== '' ? Number(expiresText) : undefined
+    void startPeer(port, bridge, {
+      token: process.env.DSH_AHOY_TOKEN,
+      expiresAt: expiresAt !== undefined && Number.isFinite(expiresAt) ? expiresAt : undefined,
+    }).then(handle => {
       if (stopped) {
         void handle.close()
         return

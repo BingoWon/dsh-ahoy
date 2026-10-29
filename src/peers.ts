@@ -51,6 +51,15 @@ export function peerUrls(envValue: string | undefined, fileText: string | undefi
   return activePeers(peerRefs(envValue, fileText), now).map(peer => peer.url)
 }
 
+/** 环境变量优先。否则读 profile 目录里的 ahoy-listen，内容是一个端口。 */
+export function listenPort(envValue: string | undefined, fileText: string | undefined): number | undefined {
+  const source = envValue !== undefined && envValue.trim() !== '' ? envValue : fileText
+  if (source === undefined || source.trim() === '') return undefined
+  const port = Number(source.trim())
+  if (!Number.isInteger(port) || port < 0 || port > 65535) return undefined
+  return port
+}
+
 export function peerConfigPath(profileDir: string | undefined): string | undefined {
   if (profileDir === undefined || profileDir === '') return undefined
   return join(profileDir, 'ahoy-peers.json')
@@ -94,4 +103,22 @@ export function loadPeerUrls(
   const refs = activePeers(peerRefs(env.DSH_AHOY_PEERS, fileText), Date.now())
   for (const peer of refs) setPeerToken(peer.url, peer.token)
   return refs.map(peer => peer.url)
+}
+
+export function loadListenPort(
+  env: NodeJS.ProcessEnv = process.env,
+  argv: readonly string[] = process.argv,
+  stack: string | undefined = new Error().stack,
+): number | undefined {
+  const peersFile = peerConfigPath(env.DSH_PROFILE_DIR || profileDirFromArgv(argv, env.DSH_HOME) || profileDirFromStack(stack))
+  const file = peersFile === undefined ? undefined : join(peersFile, '..', 'ahoy-listen')
+  let fileText: string | undefined
+  if (file !== undefined) {
+    try {
+      fileText = readFileSync(file, 'utf8')
+    } catch {
+      fileText = undefined
+    }
+  }
+  return listenPort(env.DSH_AHOY_LISTEN, fileText)
 }
