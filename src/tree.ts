@@ -4,6 +4,19 @@ export function remoteSessionId(peer: string, sessionId: string): string {
 }
 
 /** 官方会话树用路径的最后一段当分组标题。 */
+/** 官方新建会话如果带了这台机器的分组路径，就改由对方创建。 */
+export function peerForGroup(cwd: string | undefined, peers: readonly string[]): string | undefined {
+  if (cwd === undefined || !cwd.startsWith('ahoy/')) return undefined
+  const host = cwd.slice('ahoy/'.length)
+  return peers.find(peer => {
+    try {
+      return new URL(peer).host === host
+    } catch {
+      return false
+    }
+  })
+}
+
 export function machineGroupPath(peer: string): string {
   try {
     const host = new URL(peer).host

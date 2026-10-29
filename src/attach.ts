@@ -1,4 +1,4 @@
-import { callPeer, cancelPeer, followPeer, pagePeer, promptPeer, readPeer, searchPeer, type RemoteSession } from './peer'
+import { callPeer, cancelPeer, createPeer, followPeer, pagePeer, promptPeer, readPeer, searchPeer, type RemoteSession } from './peer'
 import { machineGroupPath, remoteSessionId } from './tree'
 
 export interface ListedSession {
@@ -99,6 +99,11 @@ export async function* followRemote(sessionId: string, request: Record<string, u
     const encoded = JSON.stringify(frame).split(remote.sessionId).join(sessionId)
     yield JSON.parse(encoded) as unknown
   }
+}
+
+export async function createOnPeer(peer: string, request: Record<string, unknown> = {}): Promise<{ sessionId: string, agentPreset?: string }> {
+  const created = await createPeer(peer, request)
+  return { ...created, sessionId: remoteSessionId(peer, created.sessionId) }
 }
 
 export async function attachmentRemote(sessionId: string, request: Record<string, unknown>): Promise<unknown | undefined> {

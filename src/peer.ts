@@ -22,6 +22,7 @@ export interface SessionBridge {
   cancel?(sessionId: string): Promise<{ accepted: true }>
   call?(method: 'projections' | 'rename' | 'updateQueue' | 'selectModel' | 'fork' | 'attachment', sessionId: string, request: Record<string, unknown>): Promise<unknown>
   search?(query: string): Promise<{ sessionId: string, snippet: string }[]>
+  create?(request: Record<string, unknown>): Promise<{ sessionId: string, agentPreset?: string }>
   follow?(sessionId: string, request: Record<string, unknown>, signal: AbortSignal): AsyncIterable<unknown>
   approvals?(): Promise<{ sessionId: string, toolName: string, reason?: string }[]>
   answer?(sessionId: string, outcome: 'allowed-once' | 'rejected'): Promise<{ accepted: true }>
@@ -185,6 +186,16 @@ async function handle(request: IncomingMessage, response: ServerResponse, sessio
       sendJson(response, 200, await sessions.cancel(body.sessionId))
       return
     }
+    if (request.url === '/v1/create') {
+      if (sessions.create === undefined) {
+        sendJson(response, 404, { error: 'create is not available' })
+        return
+      }
+      const body = JSON.parse(await readBody(request)) as { request?: unknown }
+      const extra = body.request !== null && typeof body.request === 'object' ? body.request as Record<string, unknown> : {}
+      sendJson(response, 200, await sessions.create(extra))
+      return
+    }
     if (request.url === '/v1/search') {
       if (sessions.search === undefined) {
         sendJson(response, 200, { items: [] })
@@ -271,6 +282,21 @@ export async function* followPeer(baseUrl: string, sessionId: string, request: R
   }
 }
 
+export async function createPeer(baseUrl: string, request: Record<string, unknown>): Promise<{ sessionId: string, agentPreset?: string }> {
+  const response = await fetch(new URL('/v1/create', baseUrl), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...peerAuthHeader(baseUrl) },
+    body: JSON.stringify({ request }),
+  })
+  if (!response.ok) throw new Error(`peer create failed: ${response.status}`)
+  const body = await response.json() as { sessionId?: unknown, agentPreset?: unknown }
+  if (typeof body.sessionId !== 'string') throw new Error('对方没有返回会话')
+  return {
+    sessionId: body.sessionId,
+    ...typeof body.agentPreset === 'string' ? { agentPreset: body.agentPreset } : {},
+  }
+}
+
 export async function searchPeer(baseUrl: string, query: string): Promise<{ sessionId: string, snippet: string }[]> {
   const response = await fetch(new URL('/v1/search', baseUrl), {
     method: 'POST',
@@ -354,6 +380,7 @@ interface SessionControllerLike {
   fork?(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>
   attachment?(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>
   search?(request: { query?: string }, signal: AbortSignal): Promise<{ items?: readonly { sessionId?: string, snippet?: string }[] }>
+  create?(request: Record<string, unknown>, signal: AbortSignal): Promise<{ sessionId?: string, agentPreset?: string }>
   follow?(request: Record<string, unknown>, signal: AbortSignal): AsyncIterable<unknown>
 }
 
@@ -376,6 +403,7 @@ export function sessionsFromHost(ctx: HostWithSessions, desk?: ApprovalDesk): Se
   const fork = face !== undefined && typeof face.fork === 'function' ? face.fork.bind(face) : undefined
   const attachment = face !== undefined && typeof face.attachment === 'function' ? face.attachment.bind(face) : undefined
   const search = face !== undefined && typeof face.search === 'function' ? face.search.bind(face) : undefined
+  const create = face !== undefined && typeof face.create === 'function' ? face.create.bind(face) : undefined
   const follow = face !== undefined && typeof face.follow === 'function' ? face.follow.bind(face) : undefined
   const page = face !== undefined && typeof face.page === 'function'
     ? face.page.bind(face)
@@ -425,6 +453,15 @@ export function sessionsFromHost(ctx: HostWithSessions, desk?: ApprovalDesk): Se
     async page(sessionId, request) {
       if (page === undefined) throw new Error('这台 DSH 没有历史接口')
       return await page({ ...request, address: { kind: 'session', sessionId } }, new AbortController().signal)
+    },
+    async create(request) {
+      if (create === undefined) throw new Error('这台 DSH 没有创建会话的接口')
+      const value = await create(request, new AbortController().signal)
+      if (typeof value.sessionId !== 'string') throw new Error('对方没有返回会话')
+      return {
+        sessionId: value.sessionId,
+        ...value.agentPreset !== undefined ? { agentPreset: value.agentPreset } : {},
+      }
     },
     async search(query) {
       if (search === undefined) return []

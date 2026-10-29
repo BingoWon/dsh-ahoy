@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { formatBytes, framesForNewSessions, remoteSessionId } from '../lib/tree.js'
+import { formatBytes, framesForNewSessions, peerForGroup, remoteSessionId } from '../lib/tree.js'
 
 test('remote sessions are announced once, with a title', () => {
   const seen = new Set()
@@ -24,6 +24,8 @@ test('remote sessions are announced once, with a title', () => {
   assert.deepEqual(framesForNewSessions(seen, [
     { peer: 'http://127.0.0.1:47331', sessionId: 'session-b', title: '部署脚本' },
   ]), [])
+  assert.equal(peerForGroup('ahoy/127.0.0.1:47341', ['http://127.0.0.1:47341']), 'http://127.0.0.1:47341')
+  assert.equal(peerForGroup('/Users/bingo', ['http://127.0.0.1:47341']), undefined)
   assert.equal(formatBytes(null), '—')
   assert.equal(formatBytes(64 * 1024 * 1024 * 1024), '64 GB')
 })

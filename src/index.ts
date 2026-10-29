@@ -8,8 +8,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createAhoyTool } from './ahoy-tool'
 import { ApprovalDesk, isApprovalOutcome, sessionIdFromApproval } from './approval'
-import { attachmentRemote, cancelRemote, followRemote, forkRemote, listWithPeers, modelRemote, pageRemote, projectionRemote, promptRemote, queueRemote, renameRemote, searchWithPeers } from './attach'
+import { attachmentRemote, cancelRemote, createOnPeer, followRemote, forkRemote, listWithPeers, modelRemote, pageRemote, projectionRemote, promptRemote, queueRemote, renameRemote, searchWithPeers } from './attach'
 import { loadListenEndpoint, loadPeerUrls } from './peers'
+import { peerForGroup } from './tree'
 import { answerPeer, approvalsPeer, readPeer, sessionsFromHost, startPeer, type SessionBridge } from './peer'
 
 export { createAhoyTool, delegateToPeer, resolvePeer } from './ahoy-tool'
@@ -139,6 +140,7 @@ function installOfficialAttach(ctx: HostContext): void {
     fork?: (request: { sessionId: string }, signal: AbortSignal) => Promise<unknown>
     attachment?: (request: { sessionId: string }, signal: AbortSignal) => Promise<unknown>
     search?: (request: { query?: string }, signal: AbortSignal) => Promise<{ items?: { sessionId?: string }[] }>
+    create?: (request: { cwd?: string, agentPreset?: string }, signal: AbortSignal) => Promise<unknown>
     follow?: (request: { address?: { kind?: string, sessionId?: string } }, signal: AbortSignal) => AsyncIterable<unknown>
   } | undefined
   if (face === undefined || typeof face.list !== 'function' || typeof face.prompt !== 'function') return
@@ -152,6 +154,7 @@ function installOfficialAttach(ctx: HostContext): void {
   const originalFork = typeof face.fork === 'function' ? face.fork.bind(face) : undefined
   const originalAttachment = typeof face.attachment === 'function' ? face.attachment.bind(face) : undefined
   const originalSearch = typeof face.search === 'function' ? face.search.bind(face) : undefined
+  const originalCreate = typeof face.create === 'function' ? face.create.bind(face) : undefined
   const originalFollow = typeof face.follow === 'function' ? face.follow.bind(face) : undefined
   console.error(`[dsh-ahoy] 官方会话列表会带上 ${peers.length} 个对方地址`)
   face.list = async (request, signal) => listWithPeers(await originalList(request, signal) as { items?: { sessionId: string }[] }, peers)
@@ -167,6 +170,15 @@ function installOfficialAttach(ctx: HostContext): void {
         return followRemote(sessionId, request, signal)
       }
       return originalFollow(request, signal)
+    }
+  }
+  if (originalCreate !== undefined) {
+    face.create = async (request, signal) => {
+      const peer = peerForGroup(request.cwd, peers)
+      if (peer !== undefined) {
+        return createOnPeer(peer, request.agentPreset !== undefined ? { agentPreset: request.agentPreset } : {})
+      }
+      return originalCreate(request, signal)
     }
   }
   if (originalSearch !== undefined) {
@@ -257,6 +269,7 @@ function installOfficialAttach(ctx: HostContext): void {
     if (originalFork !== undefined) face.fork = originalFork
     if (originalAttachment !== undefined) face.attachment = originalAttachment
     if (originalSearch !== undefined) face.search = originalSearch
+    if (originalCreate !== undefined) face.create = originalCreate
     if (originalFollow !== undefined) face.follow = originalFollow
     if (originalPage !== undefined) face.page = originalPage
     if (originalEvents !== undefined) face.events = originalEvents

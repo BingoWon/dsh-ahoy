@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { attachmentRemote, cancelRemote, followRemote, forkRemote, listWithPeers, modelRemote, pageRemote, parseRemoteSessionId, projectionRemote, promptRemote, queueRemote, renameRemote, searchWithPeers } from '../lib/attach.js'
+import { attachmentRemote, cancelRemote, createOnPeer, followRemote, forkRemote, listWithPeers, modelRemote, pageRemote, parseRemoteSessionId, projectionRemote, promptRemote, queueRemote, renameRemote, searchWithPeers } from '../lib/attach.js'
 import { startPeer } from '../lib/index.js'
 import { machineGroupPath, remoteSessionId } from '../lib/tree.js'
 
@@ -21,6 +21,9 @@ test('official list gains the peer session and a prompt goes to that peer', asyn
     async call(method, sessionId, request) {
       if (method === 'fork') return { sessionId: 'session-fork' }
       return { method, sessionId, title: request?.title, values: { title: request?.title ?? '部署脚本' } }
+    },
+    async create() {
+      return { sessionId: 'session-new', agentPreset: 'standard' }
     },
     async search(query) {
       return [{ sessionId: 'session-b', snippet: query }, { sessionId: 'ahoy:skip', snippet: query }]
@@ -66,6 +69,9 @@ test('official list gains the peer session and a prompt goes to that peer', asyn
     const image = await attachmentRemote(remoteId, { attachmentId: 'img-1' })
     assert.equal(image.method, 'attachment')
     assert.equal(image.sessionId, remoteId)
+    const created = await createOnPeer(url)
+    assert.equal(created.sessionId, remoteSessionId(url, 'session-new'))
+    assert.equal(created.agentPreset, 'standard')
     const forked = await forkRemote(remoteId, {})
     assert.equal(forked.sessionId, remoteSessionId(url, 'session-fork'))
     const found = await searchWithPeers({ items: [] }, [url], '部署')
