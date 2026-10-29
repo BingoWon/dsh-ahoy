@@ -1,6 +1,30 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { delegateToPeer, promptPeer, readPeer, startPeer } from '../lib/index.js'
+import { createAhoyTool, delegateToPeer, promptPeer, readPeer, resolvePeer, startPeer } from '../lib/index.js'
+
+test('the ahoy tool uses the only paired machine and refuses an unknown one', async () => {
+  assert.equal(resolvePeer(undefined, ['http://127.0.0.1:1']), 'http://127.0.0.1:1')
+  assert.throws(() => resolvePeer('http://127.0.0.1:9', ['http://127.0.0.1:1']), /没有配对/)
+  const prompts = []
+  const peer = await startPeer(0, {
+    async list() {
+      return [{ sessionId: 'session-b', title: '部署脚本' }]
+    },
+    async prompt(sessionId, text) {
+      prompts.push({ sessionId, text })
+      return { accepted: true, sessionId }
+    },
+  })
+  try {
+    const tool = createAhoyTool(() => [`http://127.0.0.1:${peer.port}`])
+    const summary = await tool.execute({ text: '看一下部署脚本' })
+    assert.equal(summary.includes('session-b'), true)
+    assert.equal(summary.includes('工具'), false)
+    assert.deepEqual(prompts, [{ sessionId: 'session-b', text: '看一下部署脚本' }])
+  } finally {
+    await peer.close()
+  }
+})
 
 test('a prompt is executed by the peer, not by the caller', async () => {
   const localPrompts = []

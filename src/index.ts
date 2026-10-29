@@ -6,16 +6,16 @@
  * 不要加转发进程，也不要走 SSH。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { ahoyTool } from './ahoy-tool'
+import { createAhoyTool } from './ahoy-tool'
 import { cancelRemote, listWithPeers, pageRemote, promptRemote } from './attach'
 import { loadPeerUrls } from './peers'
 import { readPeer, sessionsFromHost, startPeer, type SessionBridge } from './peer'
 
-export { delegateToPeer } from './ahoy-tool'
+export { createAhoyTool, delegateToPeer, resolvePeer } from './ahoy-tool'
 export { pagePeer, promptPeer, readPeer, sessionsFromHost, startPeer } from './peer'
 
 interface ToolsFace {
-  register(tool: typeof ahoyTool): () => void
+  register(tool: ReturnType<typeof createAhoyTool>): () => void
 }
 
 interface WebServer {
@@ -194,7 +194,7 @@ export function apply(ctx: HostContext): void {
   const tools = (typeof ctx.get === 'function' ? ctx.get('tools') : undefined) ?? ctx.tools
   const face = tools as ToolsFace | undefined
   if (face !== undefined && typeof face.register === 'function') {
-    const dispose = face.register(ahoyTool)
+    const dispose = face.register(createAhoyTool(peerList))
     ctx.effect(() => dispose, 'dsh-ahoy: tool')
   }
 
