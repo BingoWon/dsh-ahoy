@@ -1,0 +1,8 @@
+# 独立的 pnpm 根，避免被上层工作区接走。
+packages:
+  - .
+
+# pnpm 10 起默认不跑依赖安装脚本。tsdown 通过 rolldown / esbuild 的安装脚本取得本机二进制。
+allowBuilds:
+  esbuild: true
+  rolldown: true

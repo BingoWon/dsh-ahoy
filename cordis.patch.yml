@@ -1,0 +1,4 @@
+# 把宿主插件挂进当前 profile。客户端由 package.json 的 dsh.client 加载。
+- insert:
+    - id: dsh-ahoy
+      name: dsh-ahoy
