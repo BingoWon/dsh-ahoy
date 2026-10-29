@@ -231,9 +231,23 @@ interface ClientContext {
   }
 }
 
+function optionalService<T>(ctx: ClientContext, name: 'remote' | 'models' | 'uiWorkspace'): T | undefined {
+  try {
+    return ctx[name] as T | undefined
+  } catch {
+    return undefined
+  }
+}
+
 function installRemoteModelCatalog(ctx: ClientContext): void {
-  const remoteSession = ctx.remote?.session
-  const models = ctx.models
+  let remoteSession: { modelCatalog?: () => Promise<unknown> } | undefined
+  let models: ClientContext['models']
+  try {
+    remoteSession = optionalService<{ session?: { modelCatalog?: () => Promise<unknown> } }>(ctx, 'remote')?.session
+    models = optionalService<NonNullable<ClientContext['models']>>(ctx, 'models')
+  } catch {
+    return
+  }
   if (remoteSession === undefined || typeof remoteSession.modelCatalog !== 'function' || models === undefined || typeof models.directoryFor !== 'function') return
   let catalogSession: string | undefined
   const originalCatalog = remoteSession.modelCatalog.bind(remoteSession)
@@ -273,12 +287,22 @@ function installRemoteModelCatalog(ctx: ClientContext): void {
 }
 
 function apply(ctx: ClientContext): void {
-  installRemoteModelCatalog(ctx)
+  try {
+    installRemoteModelCatalog(ctx)
+  } catch {
+    // 读到未声明的服务会抛错，不能因此让整个应用启动失败。
+  }
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-ahoy: dictionaries')
   const t = ctx.locale.bind(NS)
   const page = (props: { sessions?: OfficialSessions }): ReactNode => h(MachineList, {
     ...props,
-    openSession: (sessionId) => ctx.uiWorkspace?.openSession?.(sessionId),
+    openSession: (sessionId) => {
+      try {
+        optionalService<{ openSession?: (target: string) => void }>(ctx, 'uiWorkspace')?.openSession?.(sessionId)
+      } catch {
+        // 打不开官方会话时保留 Ahoy 页，不要把异常抛进启动流程。
+      }
+    },
   })
   ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
     name: 'settings.plugins.tab',
@@ -305,6 +329,6 @@ function apply(ctx: ClientContext): void {
 
 module.exports = {
   name: 'dsh-ahoy',
-  inject: ['slots', 'locale', 'sessions', 'uiWorkspace'],
+  inject: ['slots', 'locale', 'sessions'],
   apply,
 }
