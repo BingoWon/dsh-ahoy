@@ -12,7 +12,7 @@ import { attachmentRemote, cancelRemote, createOnPeer, followRemote, forkRemote,
 import { PairDesk, redeemPairCode } from './pair'
 import { loadListenEndpoint, loadPeerUrls, savePeerRef } from './peers'
 import { cardAfterFetch, peerForGroup, type CachedMachine } from './tree'
-import { answerPeer, approvalsPeer, readPeer, sessionsFromHost, startPeer, type SessionBridge } from './peer'
+import { answerPeer, approvalsPeer, catalogPeer, readPeer, sessionsFromHost, startPeer, type SessionBridge } from './peer'
 
 export { createAhoyTool, delegateToPeer, resolvePeer } from './ahoy-tool'
 export { setPeerToken } from './peers'
@@ -209,6 +209,38 @@ function registerTree(ctx: HostContext): void {
     },
   })
   ctx.effect(() => dispose, 'dsh-ahoy: tree')
+}
+
+function registerModelCatalog(ctx: HostContext): void {
+  const webServer = optionalService<WebServer>(ctx, 'webServer')
+  if (webServer === undefined || typeof webServer.register !== 'function') return
+  const dispose = webServer.register({
+    kind: 'exact',
+    path: '/ahoy/model-catalog',
+    handler(request, response) {
+      void (async () => {
+        try {
+          const payload = JSON.parse(await readIncoming(request)) as { peer?: unknown }
+          if (typeof payload.peer !== 'string' || !peerList().includes(payload.peer)) {
+            response.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' })
+            response.end('peer is not paired')
+            return
+          }
+          const body = JSON.stringify(await catalogPeer(payload.peer))
+          response.writeHead(200, {
+            'content-type': 'application/json; charset=utf-8',
+            'content-length': Buffer.byteLength(body),
+          })
+          response.end(body)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '这台机器还没有可用模型'
+          response.writeHead(409, { 'content-type': 'text/plain; charset=utf-8' })
+          response.end(message)
+        }
+      })()
+    },
+  })
+  ctx.effect(() => dispose, 'dsh-ahoy: model-catalog')
 }
 
 export const name = 'dsh-ahoy'
@@ -469,6 +501,7 @@ function registerToolRoute(ctx: HostContext): void {
 export function apply(ctx: HostContext): void {
   const desk = new ApprovalDesk()
   registerTree(ctx)
+  registerModelCatalog(ctx)
   registerApprovalRoute(ctx)
   const bridge: SessionBridge = sessionsFromHost(ctx, desk)
   installApproval(ctx, desk)

@@ -26,6 +26,39 @@ export function machineGroupPath(peer: string): string {
   }
 }
 
+export interface RemoteModel {
+  provider: string
+  id: string
+  name: string
+}
+
+/** 只留下对方标明当前能跑的模型。目录没给出可路由的供应商时，不把名字当成能跑。 */
+export function usableModels(catalog: unknown): RemoteModel[] {
+  if (catalog === null || typeof catalog !== 'object') return []
+  const record = catalog as { groups?: unknown, routableProviders?: unknown }
+  const routable = Array.isArray(record.routableProviders)
+    ? record.routableProviders.filter((item): item is string => typeof item === 'string')
+    : []
+  if (!Array.isArray(record.groups) || routable.length === 0) return []
+  const allowed = new Set(routable)
+  const models: RemoteModel[] = []
+  for (const group of record.groups) {
+    if (group === null || typeof group !== 'object') continue
+    const provider = (group as { id?: unknown }).id
+    if (typeof provider !== 'string' || !allowed.has(provider)) continue
+    const listed = (group as { models?: unknown }).models
+    if (!Array.isArray(listed)) continue
+    for (const model of listed) {
+      if (model === null || typeof model !== 'object') continue
+      const id = (model as { id?: unknown }).id
+      if (typeof id !== 'string') continue
+      const name = (model as { name?: unknown }).name
+      models.push({ provider, id, name: typeof name === 'string' && name !== '' ? name : id })
+    }
+  }
+  return models
+}
+
 export interface TreeSession {
   peer: string
   sessionId: string

@@ -3,7 +3,7 @@
  * 桌面应用加载的是同一套客户端。
  */
 import { createElement as h, useEffect, useState, type ReactNode } from 'react'
-import { formatBytes, framesForNewSessions, remoteSessionId, type MachineCard, type TreeSession } from '../tree'
+import { formatBytes, framesForNewSessions, remoteSessionId, usableModels, type MachineCard, type TreeSession } from '../tree'
 
 const NS = 'dsh-ahoy'
 const announced = new Set<string>()
@@ -122,6 +122,51 @@ function decide(item: RemoteApproval, outcome: 'allowed-once' | 'rejected'): voi
   })
 }
 
+const NO_MODEL = '这台机器还没有可用模型'
+
+function peerOfRemoteSession(sessionId: string): string | undefined {
+  if (!sessionId.startsWith('ahoy:')) return undefined
+  const rest = sessionId.slice('ahoy:'.length)
+  const split = rest.indexOf(':')
+  if (split < 0) return undefined
+  try {
+    return decodeURIComponent(rest.slice(0, split))
+  } catch {
+    return undefined
+  }
+}
+
+function useMachineModels(peer: string): string {
+  const [text, setText] = useState('正在读取这台机器的模型')
+  useEffect(() => {
+    let stopped = false
+    const tick = async (): Promise<void> => {
+      try {
+        const response = await fetch('/ahoy/model-catalog', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ peer }),
+        })
+        if (!response.ok) {
+          if (!stopped) setText(NO_MODEL)
+          return
+        }
+        const names = usableModels(await response.json()).map(model => model.name)
+        if (!stopped) setText(names.length === 0 ? NO_MODEL : `可用模型 ${names.join('、')}`)
+      } catch {
+        if (!stopped) setText(NO_MODEL)
+      }
+    }
+    void tick()
+    return () => { stopped = true }
+  }, [peer])
+  return text
+}
+
+function MachineModels({ peer }: { peer: string }): ReactNode {
+  return h('p', { style: { margin: '4px 0' } }, useMachineModels(peer))
+}
+
 function MachineList({ sessions, openSession }: { sessions?: OfficialSessions, openSession: (sessionId: string) => void }): ReactNode {
   const text = dictionary()
   const { machines } = useRemoteSessions(sessions)
@@ -144,6 +189,7 @@ function MachineList({ sessions, openSession }: { sessions?: OfficialSessions, o
       },
       h('strong', null, machine.peer),
       h('p', { style: { margin: '4px 0' } }, machineLine(machine)),
+      h(MachineModels, { peer: machine.peer }),
       machine.sessions.length === 0 ? null : h('ul', { style: { margin: 0, paddingLeft: '18px' } },
         machine.sessions.map(session => h('li', { key: session.sessionId },
           h('button', {
@@ -171,6 +217,10 @@ interface ClientContext {
   effect(dispose: () => void, label: string): void
   sessions?: OfficialSessions
   uiWorkspace?: { openSession?: (target: string) => void }
+  remote?: { session?: { modelCatalog?: () => Promise<unknown> } }
+  models?: {
+    directoryFor?: (sessionId: string) => { load?: () => Promise<unknown>, __ahoyWrapped?: boolean }
+  }
   locale: {
     register(namespace: string, dictionaries: { zh: Dict, en: Dict }): () => void
     bind(namespace: string): (key: keyof Dict) => string
@@ -181,7 +231,49 @@ interface ClientContext {
   }
 }
 
+function installRemoteModelCatalog(ctx: ClientContext): void {
+  const remoteSession = ctx.remote?.session
+  const models = ctx.models
+  if (remoteSession === undefined || typeof remoteSession.modelCatalog !== 'function' || models === undefined || typeof models.directoryFor !== 'function') return
+  let catalogSession: string | undefined
+  const originalCatalog = remoteSession.modelCatalog.bind(remoteSession)
+  remoteSession.modelCatalog = () => {
+    if (catalogSession === undefined) return originalCatalog()
+    const sessionId = catalogSession
+    return (async () => {
+      const peer = peerOfRemoteSession(sessionId)
+      if (peer === undefined) return { ok: false, error: { code: 'ahoy', message: NO_MODEL } }
+      const response = await fetch('/ahoy/model-catalog', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ peer }),
+      })
+      if (!response.ok) return { ok: false, error: { code: 'ahoy', message: NO_MODEL } }
+      const value: unknown = await response.json()
+      if (usableModels(value).length === 0) return { ok: false, error: { code: 'ahoy', message: NO_MODEL } }
+      return { ok: true, value }
+    })()
+  }
+  const originalDirectory = models.directoryFor.bind(models)
+  models.directoryFor = (sessionId) => {
+    const directory = originalDirectory(sessionId)
+    if (!sessionId.startsWith('ahoy:') || directory.__ahoyWrapped === true || typeof directory.load !== 'function') return directory
+    const load = directory.load.bind(directory)
+    directory.load = () => {
+      catalogSession = sessionId
+      try {
+        return load()
+      } finally {
+        catalogSession = undefined
+      }
+    }
+    directory.__ahoyWrapped = true
+    return directory
+  }
+}
+
 function apply(ctx: ClientContext): void {
+  installRemoteModelCatalog(ctx)
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-ahoy: dictionaries')
   const t = ctx.locale.bind(NS)
   const page = (props: { sessions?: OfficialSessions }): ReactNode => h(MachineList, {

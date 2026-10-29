@@ -25,6 +25,7 @@ export interface SessionBridge {
   search?(query: string): Promise<{ sessionId: string, snippet: string }[]>
   create?(request: Record<string, unknown>): Promise<{ sessionId: string, agentPreset?: string }>
   follow?(sessionId: string, request: Record<string, unknown>, signal: AbortSignal): AsyncIterable<unknown>
+  modelCatalog?(): Promise<unknown>
   approvals?(): Promise<{ sessionId: string, toolName: string, reason?: string }[]>
   answer?(sessionId: string, outcome: 'allowed-once' | 'rejected'): Promise<{ accepted: true }>
 }
@@ -148,6 +149,14 @@ async function handle(request: IncomingMessage, response: ServerResponse, sessio
     return
   }
   try {
+    if (request.url === '/v1/modelCatalog') {
+      if (sessions.modelCatalog === undefined) {
+        sendJson(response, 409, { error: '这台机器还没有可用模型' })
+        return
+      }
+      sendJson(response, 200, await sessions.modelCatalog())
+      return
+    }
     if (request.url === '/v1/status') {
       sendJson(response, 200, { ...readMachineStatus(), sessions: await sessions.list() })
       return
@@ -274,6 +283,15 @@ async function handle(request: IncomingMessage, response: ServerResponse, sessio
   } catch (error) {
     sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) })
   }
+}
+
+export async function catalogPeer(baseUrl: string): Promise<unknown> {
+  const response = await fetch(new URL('/v1/modelCatalog', baseUrl), {
+    method: 'POST',
+    headers: { ...peerAuthHeader(baseUrl) },
+  })
+  if (!response.ok) throw new Error('这台机器还没有可用模型')
+  return response.json()
 }
 
 export async function readPeer(baseUrl: string): Promise<PeerStatus> {
@@ -417,6 +435,7 @@ interface SessionControllerLike {
   search?(request: { query?: string }, signal: AbortSignal): Promise<{ items?: readonly { sessionId?: string, snippet?: string }[] }>
   create?(request: Record<string, unknown>, signal: AbortSignal): Promise<{ sessionId?: string, agentPreset?: string }>
   follow?(request: Record<string, unknown>, signal: AbortSignal): AsyncIterable<unknown>
+  modelCatalog?(signal: AbortSignal): Promise<unknown>
 }
 
 interface HostWithSessions {
@@ -440,12 +459,17 @@ export function sessionsFromHost(ctx: HostWithSessions, desk?: ApprovalDesk): Se
   const search = face !== undefined && typeof face.search === 'function' ? face.search.bind(face) : undefined
   const create = face !== undefined && typeof face.create === 'function' ? face.create.bind(face) : undefined
   const follow = face !== undefined && typeof face.follow === 'function' ? face.follow.bind(face) : undefined
+  const readCatalog = face !== undefined && typeof face.modelCatalog === 'function' ? face.modelCatalog.bind(face) : undefined
   const page = face !== undefined && typeof face.page === 'function'
     ? face.page.bind(face)
     : face !== undefined && typeof face.events === 'function'
       ? face.events.bind(face)
       : undefined
   return {
+    async modelCatalog() {
+      if (readCatalog === undefined) throw new Error('这台机器还没有可用模型')
+      return readCatalog(new AbortController().signal)
+    },
     async list() {
       if (list === undefined) return []
       const value = await list({}, new AbortController().signal)

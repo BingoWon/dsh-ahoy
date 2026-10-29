@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { formatBytes, framesForNewSessions, peerForGroup, remoteSessionId } from '../lib/tree.js'
+import { formatBytes, framesForNewSessions, peerForGroup, remoteSessionId, usableModels } from '../lib/tree.js'
 
 test('remote sessions are announced once, with a title', () => {
   const seen = new Set()
@@ -26,6 +26,14 @@ test('remote sessions are announced once, with a title', () => {
   ]), [])
   assert.equal(peerForGroup('ahoy/127.0.0.1:47341', ['http://127.0.0.1:47341']), 'http://127.0.0.1:47341')
   assert.equal(peerForGroup('/Users/bingo', ['http://127.0.0.1:47341']), undefined)
+  assert.deepEqual(usableModels({
+    routableProviders: ['ss'],
+    groups: [
+      { id: 'ss', models: [{ id: 'deepseek-v4-flash', name: 'flash' }] },
+      { id: 'deepseek-official', models: [{ id: 'deepseek-v4', name: 'official' }] },
+    ],
+  }).map(model => model.id), ['deepseek-v4-flash'])
+  assert.deepEqual(usableModels({ groups: [{ id: 'ss', models: [{ id: 'x', name: 'x' }] }] }), [])
   assert.equal(formatBytes(null), '—')
   assert.equal(formatBytes(64 * 1024 * 1024 * 1024), '64 GB')
 })
