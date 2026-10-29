@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { acceptPeer, createAhoyTool, delegateToPeer, promptPeer, readPeer, resolvePeer, setPeerToken, startPeer } from '../lib/index.js'
+import { acceptPeer, createAhoyTool, delegateToPeer, isOverlayAddress, promptPeer, readPeer, resolvePeer, setPeerToken, startPeer } from '../lib/index.js'
 
 test('the ahoy tool uses the only paired machine and refuses an unknown one', async () => {
   assert.equal(resolvePeer(undefined, ['http://127.0.0.1:1']), 'http://127.0.0.1:1')
@@ -65,11 +65,14 @@ test('an expired pairing token cannot list sessions', async () => {
   }
 })
 
-test('virtual addresses require a pairing token', () => {
+test('overlay addresses are accepted without a pairing code', () => {
+  assert.equal(isOverlayAddress('100.121.220.16'), true)
+  assert.equal(isOverlayAddress('8.8.8.8'), false)
   assert.equal(acceptPeer('127.0.0.1', false), true)
   assert.equal(acceptPeer('::1', false), true)
-  assert.equal(acceptPeer('100.64.0.8', false), false)
-  assert.equal(acceptPeer('100.64.0.8', true), true)
+  assert.equal(acceptPeer('100.121.220.16', false), true)
+  assert.equal(acceptPeer('8.8.8.8', false), false)
+  assert.equal(acceptPeer('8.8.8.8', true), true)
 })
 
 test('a revoked pairing token cannot list sessions', async () => {

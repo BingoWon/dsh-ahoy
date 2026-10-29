@@ -17,7 +17,7 @@ import { answerPeer, approvalsPeer, readPeer, sessionsFromHost, startPeer, type 
 export { createAhoyTool, delegateToPeer, resolvePeer } from './ahoy-tool'
 export { setPeerToken } from './peers'
 export { ApprovalDesk, sessionIdFromApproval } from './approval'
-export { acceptPeer, answerPeer, approvalsPeer, pagePeer, promptPeer, readPeer, sessionsFromHost, startPeer } from './peer'
+export { acceptPeer, answerPeer, approvalsPeer, isOverlayAddress, pagePeer, promptPeer, readPeer, sessionsFromHost, startPeer } from './peer'
 export { readMachineStatus } from './metrics'
 export { PairDesk, readPairCode, redeemPairCode } from './pair'
 

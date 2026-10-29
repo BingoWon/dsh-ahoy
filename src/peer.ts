@@ -58,9 +58,20 @@ function remoteAddress(request: IncomingMessage): string {
   return address.startsWith('::ffff:') ? address.slice(7) : address
 }
 
-/** 没有配对令牌时只接受本机。有令牌时才接受 NetBird 或 Tailscale 的虚拟地址。 */
+/** NetBird 和 Tailscale 的 IPv4 都在 100.64.0.0/10。虚拟网本身就是边界，不再要配对码。 */
+export function isOverlayAddress(address: string): boolean {
+  const v4 = address.startsWith('::ffff:') ? address.slice(7) : address
+  const parts = v4.split('.')
+  if (parts.length !== 4) return false
+  const numbers = parts.map(part => Number(part))
+  if (numbers.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return false
+  const [first, second] = numbers
+  return first === 100 && second !== undefined && second >= 64 && second <= 127
+}
+
+/** 本机和虚拟网地址直接接受。公网地址仍然要令牌，而且不主动监听公网。 */
 export function acceptPeer(address: string, tokenConfigured: boolean): boolean {
-  if (address === '127.0.0.1' || address === '::1') return true
+  if (address === '127.0.0.1' || address === '::1' || isOverlayAddress(address)) return true
   return tokenConfigured && address !== ''
 }
 
