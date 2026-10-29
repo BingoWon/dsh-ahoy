@@ -4,7 +4,6 @@ dist/
 *.log
 .env
 .env.*
-relay-data/
 
 # 文档只留在本机，禁止进入公开仓库。不要用 git add -f 绕过。
 docs/
