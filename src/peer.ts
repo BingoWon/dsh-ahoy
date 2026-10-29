@@ -20,7 +20,7 @@ export interface SessionBridge {
   prompt(sessionId: string, text: string): Promise<PromptResult>
   page?(sessionId: string, request: Record<string, unknown>): Promise<unknown>
   cancel?(sessionId: string): Promise<{ accepted: true }>
-  call?(method: 'projections' | 'rename' | 'updateQueue' | 'selectModel' | 'fork', sessionId: string, request: Record<string, unknown>): Promise<unknown>
+  call?(method: 'projections' | 'rename' | 'updateQueue' | 'selectModel' | 'fork' | 'attachment', sessionId: string, request: Record<string, unknown>): Promise<unknown>
   search?(query: string): Promise<{ sessionId: string, snippet: string }[]>
   follow?(sessionId: string, request: Record<string, unknown>, signal: AbortSignal): AsyncIterable<unknown>
   approvals?(): Promise<{ sessionId: string, toolName: string, reason?: string }[]>
@@ -157,7 +157,7 @@ async function handle(request: IncomingMessage, response: ServerResponse, sessio
         return
       }
       const body = JSON.parse(await readBody(request)) as { method?: unknown, sessionId?: unknown, request?: unknown }
-      if ((body.method !== 'projections' && body.method !== 'rename' && body.method !== 'updateQueue' && body.method !== 'selectModel' && body.method !== 'fork') || typeof body.sessionId !== 'string') {
+      if ((body.method !== 'projections' && body.method !== 'rename' && body.method !== 'updateQueue' && body.method !== 'selectModel' && body.method !== 'fork' && body.method !== 'attachment') || typeof body.sessionId !== 'string') {
         sendJson(response, 400, { error: 'method and sessionId are required' })
         return
       }
@@ -275,7 +275,7 @@ export async function searchPeer(baseUrl: string, query: string): Promise<{ sess
   return body.items ?? []
 }
 
-export async function callPeer(baseUrl: string, method: 'projections' | 'rename' | 'updateQueue' | 'selectModel' | 'fork', sessionId: string, request: Record<string, unknown>): Promise<unknown> {
+export async function callPeer(baseUrl: string, method: 'projections' | 'rename' | 'updateQueue' | 'selectModel' | 'fork' | 'attachment', sessionId: string, request: Record<string, unknown>): Promise<unknown> {
   const response = await fetch(new URL('/v1/session', baseUrl), {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...peerAuthHeader(baseUrl) },
@@ -345,6 +345,7 @@ interface SessionControllerLike {
   updateQueue?(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>
   selectModel?(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>
   fork?(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>
+  attachment?(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>
   search?(request: { query?: string }, signal: AbortSignal): Promise<{ items?: readonly { sessionId?: string, snippet?: string }[] }>
   follow?(request: Record<string, unknown>, signal: AbortSignal): AsyncIterable<unknown>
 }
@@ -366,6 +367,7 @@ export function sessionsFromHost(ctx: HostWithSessions, desk?: ApprovalDesk): Se
   const updateQueue = face !== undefined && typeof face.updateQueue === 'function' ? face.updateQueue.bind(face) : undefined
   const selectModel = face !== undefined && typeof face.selectModel === 'function' ? face.selectModel.bind(face) : undefined
   const fork = face !== undefined && typeof face.fork === 'function' ? face.fork.bind(face) : undefined
+  const attachment = face !== undefined && typeof face.attachment === 'function' ? face.attachment.bind(face) : undefined
   const search = face !== undefined && typeof face.search === 'function' ? face.search.bind(face) : undefined
   const follow = face !== undefined && typeof face.follow === 'function' ? face.follow.bind(face) : undefined
   const page = face !== undefined && typeof face.page === 'function'
@@ -403,7 +405,8 @@ export function sessionsFromHost(ctx: HostWithSessions, desk?: ApprovalDesk): Se
         : method === 'rename' ? rename
           : method === 'updateQueue' ? updateQueue
             : method === 'selectModel' ? selectModel
-              : fork
+              : method === 'fork' ? fork
+                : attachment
       if (target === undefined) throw new Error('这台 DSH 没有这个会话接口')
       return await target({ ...request, sessionId }, new AbortController().signal)
     },

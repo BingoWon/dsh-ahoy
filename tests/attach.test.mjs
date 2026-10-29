@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { cancelRemote, followRemote, forkRemote, listWithPeers, modelRemote, pageRemote, parseRemoteSessionId, projectionRemote, promptRemote, queueRemote, renameRemote, searchWithPeers } from '../lib/attach.js'
+import { attachmentRemote, cancelRemote, followRemote, forkRemote, listWithPeers, modelRemote, pageRemote, parseRemoteSessionId, projectionRemote, promptRemote, queueRemote, renameRemote, searchWithPeers } from '../lib/attach.js'
 import { startPeer } from '../lib/index.js'
 import { machineGroupPath, remoteSessionId } from '../lib/tree.js'
 
@@ -63,6 +63,9 @@ test('official list gains the peer session and a prompt goes to that peer', asyn
     const queued = await queueRemote(remoteId, { itemId: 'item-1', action: { kind: 'remove' } })
     assert.equal(queued.method, 'updateQueue')
     assert.equal(queued.sessionId, remoteId)
+    const image = await attachmentRemote(remoteId, { attachmentId: 'img-1' })
+    assert.equal(image.method, 'attachment')
+    assert.equal(image.sessionId, remoteId)
     const forked = await forkRemote(remoteId, {})
     assert.equal(forked.sessionId, remoteSessionId(url, 'session-fork'))
     const found = await searchWithPeers({ items: [] }, [url], '部署')
