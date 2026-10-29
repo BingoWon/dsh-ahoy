@@ -12,6 +12,7 @@ import { loadPeerUrls } from './peers'
 import { readPeer, sessionsFromHost, startPeer, type SessionBridge } from './peer'
 
 export { createAhoyTool, delegateToPeer, resolvePeer } from './ahoy-tool'
+export { setPeerToken } from './peers'
 export { pagePeer, promptPeer, readPeer, sessionsFromHost, startPeer } from './peer'
 
 interface ToolsFace {
@@ -196,7 +197,7 @@ export function apply(ctx: HostContext): void {
     if (!Number.isInteger(port) || port < 0 || port > 65535) {
       throw new Error(`DSH_AHOY_LISTEN 不是端口: ${listen}`)
     }
-    void startPeer(port, bridge).then(handle => {
+    void startPeer(port, bridge, { token: process.env.DSH_AHOY_TOKEN }).then(handle => {
       if (stopped) {
         void handle.close()
         return

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createAhoyTool, delegateToPeer, promptPeer, readPeer, resolvePeer, startPeer } from '../lib/index.js'
+import { createAhoyTool, delegateToPeer, promptPeer, readPeer, resolvePeer, setPeerToken, startPeer } from '../lib/index.js'
 
 test('the ahoy tool uses the only paired machine and refuses an unknown one', async () => {
   assert.equal(resolvePeer(undefined, ['http://127.0.0.1:1']), 'http://127.0.0.1:1')
@@ -22,6 +22,29 @@ test('the ahoy tool uses the only paired machine and refuses an unknown one', as
     assert.equal(summary.includes('工具'), false)
     assert.deepEqual(prompts, [{ sessionId: 'session-b', text: '看一下部署脚本' }])
   } finally {
+    await peer.close()
+  }
+})
+
+test('a revoked pairing token cannot list sessions', async () => {
+  const peer = await startPeer(0, {
+    async list() {
+      return [{ sessionId: 'session-b', title: '部署脚本' }]
+    },
+    async prompt(sessionId) {
+      return { accepted: true, sessionId }
+    },
+  }, { token: 'new-token' })
+  const url = `http://127.0.0.1:${peer.port}`
+  try {
+    await assert.rejects(readPeer(url))
+    setPeerToken(url, 'old-token')
+    await assert.rejects(readPeer(url))
+    setPeerToken(url, 'new-token')
+    const status = await readPeer(url)
+    assert.equal(status.sessions[0]?.sessionId, 'session-b')
+  } finally {
+    setPeerToken(url, undefined)
     await peer.close()
   }
 })

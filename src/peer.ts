@@ -1,6 +1,8 @@
+import { timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { readMachineStatus, type MachineStatus } from './metrics'
+import { peerAuthHeader } from './peers'
 
 export interface RemoteSession {
   sessionId: string
@@ -50,10 +52,20 @@ function remoteAddress(request: IncomingMessage): string {
   return address.startsWith('::ffff:') ? address.slice(7) : address
 }
 
-/** 只接受本机连进来。这是两个插件直接说话，不是转发。 */
-export function startPeer(port: number, sessions: SessionBridge): Promise<PeerHandle> {
+function tokenMatches(request: IncomingMessage, expected: string | undefined): boolean {
+  if (expected === undefined || expected === '') return true
+  const header = request.headers['x-ahoy-token']
+  const got = Array.isArray(header) ? header[0] : header
+  if (typeof got !== 'string') return false
+  const left = Buffer.from(got)
+  const right = Buffer.from(expected)
+  return left.length === right.length && timingSafeEqual(left, right)
+}
+
+/** 只接受本机连进来。设了令牌以后，撤销就是换掉这枚令牌。 */
+export function startPeer(port: number, sessions: SessionBridge, options?: { token?: string }): Promise<PeerHandle> {
   const server: Server = createServer((request, response) => {
-    void handle(request, response, sessions)
+    void handle(request, response, sessions, options?.token)
   })
   return new Promise((resolve, reject) => {
     server.once('error', reject)
@@ -73,10 +85,14 @@ export function startPeer(port: number, sessions: SessionBridge): Promise<PeerHa
   })
 }
 
-async function handle(request: IncomingMessage, response: ServerResponse, sessions: SessionBridge): Promise<void> {
+async function handle(request: IncomingMessage, response: ServerResponse, sessions: SessionBridge, token?: string): Promise<void> {
   const address = remoteAddress(request)
   if (address !== '127.0.0.1' && address !== '::1') {
     sendJson(response, 403, { error: 'only loopback clients are accepted' })
+    return
+  }
+  if (!tokenMatches(request, token)) {
+    sendJson(response, 403, { error: 'pairing token was rejected' })
     return
   }
   if (request.method !== 'POST') {
@@ -173,7 +189,7 @@ async function handle(request: IncomingMessage, response: ServerResponse, sessio
 }
 
 export async function readPeer(baseUrl: string): Promise<PeerStatus> {
-  const response = await fetch(new URL('/v1/status', baseUrl), { method: 'POST' })
+  const response = await fetch(new URL('/v1/status', baseUrl), { method: 'POST', headers: peerAuthHeader(baseUrl) })
   if (!response.ok) throw new Error(`peer status failed: ${response.status}`)
   return await response.json() as PeerStatus
 }
@@ -181,7 +197,7 @@ export async function readPeer(baseUrl: string): Promise<PeerStatus> {
 export async function pagePeer(baseUrl: string, sessionId: string, request: Record<string, unknown>): Promise<unknown> {
   const response = await fetch(new URL('/v1/page', baseUrl), {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...peerAuthHeader(baseUrl) },
     body: JSON.stringify({ sessionId, request }),
   })
   if (!response.ok) throw new Error(`peer page failed: ${response.status}`)
@@ -191,7 +207,7 @@ export async function pagePeer(baseUrl: string, sessionId: string, request: Reco
 export async function* followPeer(baseUrl: string, sessionId: string, request: Record<string, unknown>, signal: AbortSignal): AsyncGenerator<unknown> {
   const response = await fetch(new URL('/v1/follow', baseUrl), {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...peerAuthHeader(baseUrl) },
     body: JSON.stringify({ sessionId, request }),
     signal,
   })
@@ -216,7 +232,7 @@ export async function* followPeer(baseUrl: string, sessionId: string, request: R
 export async function callPeer(baseUrl: string, method: 'projections' | 'rename', sessionId: string, request: Record<string, unknown>): Promise<unknown> {
   const response = await fetch(new URL('/v1/session', baseUrl), {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...peerAuthHeader(baseUrl) },
     body: JSON.stringify({ method, sessionId, request }),
   })
   if (!response.ok) {
@@ -229,7 +245,7 @@ export async function callPeer(baseUrl: string, method: 'projections' | 'rename'
 export async function cancelPeer(baseUrl: string, sessionId: string): Promise<{ accepted: true }> {
   const response = await fetch(new URL('/v1/cancel', baseUrl), {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...peerAuthHeader(baseUrl) },
     body: JSON.stringify({ sessionId }),
   })
   if (!response.ok) {
@@ -243,7 +259,7 @@ export async function cancelPeer(baseUrl: string, sessionId: string): Promise<{ 
 export async function promptPeer(baseUrl: string, sessionId: string, text: string): Promise<PromptResult> {
   const response = await fetch(new URL('/v1/prompt', baseUrl), {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...peerAuthHeader(baseUrl) },
     body: JSON.stringify({ sessionId, text }),
   })
   if (!response.ok) throw new Error(`peer prompt failed: ${response.status}`)

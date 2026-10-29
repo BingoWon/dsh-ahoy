@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { peerConfigPath, peerUrls, profileDirFromArgv, profileDirFromStack } from '../lib/peers.js'
+import { peerConfigPath, peerRefs, peerUrls, profileDirFromArgv, profileDirFromStack } from '../lib/peers.js'
 
 test('env peers win, otherwise the profile file is used', () => {
   assert.deepEqual(peerUrls('http://127.0.0.1:1, http://127.0.0.1:2', '{"peers":["http://127.0.0.1:9"]}'), [
@@ -8,6 +8,9 @@ test('env peers win, otherwise the profile file is used', () => {
     'http://127.0.0.1:2',
   ])
   assert.deepEqual(peerUrls(undefined, '{"peers":[" http://127.0.0.1:47341 "]}'), ['http://127.0.0.1:47341'])
+  assert.deepEqual(peerRefs(undefined, '{"peers":[{"url":"http://127.0.0.1:47341","token":"new-token"}]}'), [
+    { url: 'http://127.0.0.1:47341', token: 'new-token' },
+  ])
   assert.deepEqual(peerUrls('', 'not json'), [])
   assert.equal(peerConfigPath('/Users/bingo/.dsh/profiles/desktop'), '/Users/bingo/.dsh/profiles/desktop/ahoy-peers.json')
   assert.equal(peerConfigPath(undefined), undefined)

@@ -1,18 +1,47 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+export interface PeerRef {
+  url: string
+  token?: string
+}
+
+const peerTokens = new Map<string, string>()
+
+/** 记下配对文件里的令牌。撤销就是换成另一枚，旧请求会被拒绝。 */
+export function setPeerToken(url: string, token: string | undefined): void {
+  if (token === undefined || token === '') peerTokens.delete(url)
+  else peerTokens.set(url, token)
+}
+
+export function peerAuthHeader(url: string): Record<string, string> {
+  const token = peerTokens.get(url)
+  return token === undefined ? {} : { 'x-ahoy-token': token }
+}
+
 /** 环境变量优先。桌面应用没有这个环境变量时，读 profile 目录里的 ahoy-peers.json。 */
-export function peerUrls(envValue: string | undefined, fileText: string | undefined): string[] {
+export function peerRefs(envValue: string | undefined, fileText: string | undefined): PeerRef[] {
   const fromEnv = (envValue ?? '').split(',').map(item => item.trim()).filter(item => item !== '')
-  if (fromEnv.length > 0) return fromEnv
+  if (fromEnv.length > 0) return fromEnv.map(url => ({ url }))
   if (fileText === undefined || fileText.trim() === '') return []
   try {
     const parsed = JSON.parse(fileText) as { peers?: unknown }
     if (!Array.isArray(parsed.peers)) return []
-    return parsed.peers.flatMap(item => typeof item === 'string' && item.trim() !== '' ? [item.trim()] : [])
+    return parsed.peers.flatMap(item => {
+      if (typeof item === 'string' && item.trim() !== '') return [{ url: item.trim() }]
+      if (item !== null && typeof item === 'object' && 'url' in item && typeof item.url === 'string' && item.url.trim() !== '') {
+        const token = 'token' in item && typeof item.token === 'string' ? item.token : undefined
+        return [{ url: item.url.trim(), token }]
+      }
+      return []
+    })
   } catch {
     return []
   }
+}
+
+export function peerUrls(envValue: string | undefined, fileText: string | undefined): string[] {
+  return peerRefs(envValue, fileText).map(peer => peer.url)
 }
 
 export function peerConfigPath(profileDir: string | undefined): string | undefined {
@@ -55,5 +84,7 @@ export function loadPeerUrls(
       fileText = undefined
     }
   }
-  return peerUrls(env.DSH_AHOY_PEERS, fileText)
+  const refs = peerRefs(env.DSH_AHOY_PEERS, fileText)
+  for (const peer of refs) setPeerToken(peer.url, peer.token)
+  return refs.map(peer => peer.url)
 }
