@@ -7,7 +7,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createAhoyTool } from './ahoy-tool'
-import { cancelRemote, listWithPeers, pageRemote, projectionRemote, promptRemote } from './attach'
+import { cancelRemote, followRemote, listWithPeers, pageRemote, projectionRemote, promptRemote } from './attach'
 import { loadPeerUrls } from './peers'
 import { readPeer, sessionsFromHost, startPeer, type SessionBridge } from './peer'
 
@@ -122,18 +122,29 @@ function installOfficialAttach(ctx: HostContext): void {
     events?: (request: { address?: { kind?: string, sessionId?: string } }, signal: AbortSignal) => Promise<unknown>
     cancel?: (request: { sessionId: string }, signal: AbortSignal) => Promise<unknown>
     projections?: (request: { sessionId: string }, signal: AbortSignal) => Promise<unknown>
+    follow?: (request: { address?: { kind?: string, sessionId?: string } }, signal: AbortSignal) => AsyncIterable<unknown>
   } | undefined
   if (face === undefined || typeof face.list !== 'function' || typeof face.prompt !== 'function') return
   const originalList = face.list.bind(face)
   const originalPrompt = face.prompt.bind(face)
   const originalCancel = typeof face.cancel === 'function' ? face.cancel.bind(face) : undefined
   const originalProjections = typeof face.projections === 'function' ? face.projections.bind(face) : undefined
+  const originalFollow = typeof face.follow === 'function' ? face.follow.bind(face) : undefined
   console.error(`[dsh-ahoy] 官方会话列表会带上 ${peers.length} 个对方地址`)
   face.list = async (request, signal) => listWithPeers(await originalList(request, signal) as { items?: { sessionId: string }[] }, peers)
   face.prompt = async (request, signal) => {
     const forwarded = await promptRemote(request)
     if (forwarded !== undefined) return forwarded
     return originalPrompt(request, signal)
+  }
+  if (originalFollow !== undefined) {
+    face.follow = (request, signal) => {
+      const sessionId = request.address?.kind === 'session' ? request.address.sessionId : undefined
+      if (typeof sessionId === 'string' && sessionId.startsWith('ahoy:')) {
+        return followRemote(sessionId, request, signal)
+      }
+      return originalFollow(request, signal)
+    }
   }
   if (originalProjections !== undefined) {
     face.projections = async (request, signal) => {
@@ -167,6 +178,7 @@ function installOfficialAttach(ctx: HostContext): void {
     face.prompt = originalPrompt
     if (originalCancel !== undefined) face.cancel = originalCancel
     if (originalProjections !== undefined) face.projections = originalProjections
+    if (originalFollow !== undefined) face.follow = originalFollow
     if (originalPage !== undefined) face.page = originalPage
     if (originalEvents !== undefined) face.events = originalEvents
   }, 'dsh-ahoy: attach')

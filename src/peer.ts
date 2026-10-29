@@ -18,6 +18,7 @@ export interface SessionBridge {
   page?(sessionId: string, request: Record<string, unknown>): Promise<unknown>
   cancel?(sessionId: string): Promise<{ accepted: true }>
   call?(method: 'projections' | 'rename', sessionId: string, request: Record<string, unknown>): Promise<unknown>
+  follow?(sessionId: string, request: Record<string, unknown>, signal: AbortSignal): AsyncIterable<unknown>
 }
 
 export interface PeerStatus extends MachineStatus {
@@ -100,6 +101,35 @@ async function handle(request: IncomingMessage, response: ServerResponse, sessio
       sendJson(response, 200, await sessions.page(body.sessionId, body.request as Record<string, unknown>))
       return
     }
+    if (request.url === '/v1/follow') {
+      if (sessions.follow === undefined) {
+        sendJson(response, 404, { error: 'follow is not available' })
+        return
+      }
+      const body = JSON.parse(await readBody(request)) as { sessionId?: unknown, request?: unknown }
+      if (typeof body.sessionId !== 'string' || body.request === null || typeof body.request !== 'object') {
+        sendJson(response, 400, { error: 'sessionId and request are required' })
+        return
+      }
+      const controller = new AbortController()
+      request.on('close', () => controller.abort())
+      response.writeHead(200, { 'content-type': 'application/x-ndjson; charset=utf-8' })
+      try {
+        for await (const frame of sessions.follow(body.sessionId, body.request as Record<string, unknown>, controller.signal)) {
+          if (!response.write(`${JSON.stringify(frame)}\n`)) {
+            await new Promise(resolve => response.once('drain', resolve))
+          }
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          const message = error instanceof Error ? error.message : String(error)
+          response.write(`${JSON.stringify({ type: 'error', message })}\n`)
+        }
+      } finally {
+        response.end()
+      }
+      return
+    }
     if (request.url === '/v1/session') {
       if (sessions.call === undefined) {
         sendJson(response, 404, { error: 'session call is not available' })
@@ -158,6 +188,31 @@ export async function pagePeer(baseUrl: string, sessionId: string, request: Reco
   return await response.json()
 }
 
+export async function* followPeer(baseUrl: string, sessionId: string, request: Record<string, unknown>, signal: AbortSignal): AsyncGenerator<unknown> {
+  const response = await fetch(new URL('/v1/follow', baseUrl), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionId, request }),
+    signal,
+  })
+  if (!response.ok || response.body === null) throw new Error(`peer follow failed: ${response.status}`)
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const chunk = await reader.read()
+    if (chunk.done) break
+    buffer += decoder.decode(chunk.value, { stream: true })
+    let newline = buffer.indexOf('\n')
+    while (newline >= 0) {
+      const line = buffer.slice(0, newline).trim()
+      buffer = buffer.slice(newline + 1)
+      if (line !== '') yield JSON.parse(line) as unknown
+      newline = buffer.indexOf('\n')
+    }
+  }
+}
+
 export async function callPeer(baseUrl: string, method: 'projections' | 'rename', sessionId: string, request: Record<string, unknown>): Promise<unknown> {
   const response = await fetch(new URL('/v1/session', baseUrl), {
     method: 'POST',
@@ -208,6 +263,7 @@ interface SessionControllerLike {
   cancel?(request: { sessionId: string }, signal: AbortSignal): Promise<unknown>
   projections?(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>
   rename?(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>
+  follow?(request: Record<string, unknown>, signal: AbortSignal): AsyncIterable<unknown>
 }
 
 interface HostWithSessions {
@@ -224,6 +280,7 @@ export function sessionsFromHost(ctx: HostWithSessions): SessionBridge {
   const cancel = face !== undefined && typeof face.cancel === 'function' ? face.cancel.bind(face) : undefined
   const projections = face !== undefined && typeof face.projections === 'function' ? face.projections.bind(face) : undefined
   const rename = face !== undefined && typeof face.rename === 'function' ? face.rename.bind(face) : undefined
+  const follow = face !== undefined && typeof face.follow === 'function' ? face.follow.bind(face) : undefined
   const page = face !== undefined && typeof face.page === 'function'
     ? face.page.bind(face)
     : face !== undefined && typeof face.events === 'function'
@@ -249,6 +306,10 @@ export function sessionsFromHost(ctx: HostWithSessions): SessionBridge {
         requestId: crypto.randomUUID(),
       }, new AbortController().signal)
       return { accepted: true, sessionId }
+    },
+    async *follow(sessionId, request, signal) {
+      if (follow === undefined) throw new Error('这台 DSH 没有跟随接口')
+      yield* follow({ ...request, address: { kind: 'session', sessionId } }, signal)
     },
     async call(method, sessionId, request) {
       const target = method === 'projections' ? projections : rename
