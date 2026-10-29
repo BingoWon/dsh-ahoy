@@ -114,19 +114,6 @@ function useApprovals(): RemoteApproval[] {
   return items
 }
 
-function ApprovalBar(): ReactNode {
-  const items = useApprovals()
-  if (items.length === 0) return null
-  return h('div', { style: { padding: '8px 12px' } }, items.map(item => h('div', {
-    key: `${item.peer}:${item.sessionId}`,
-    style: { marginBottom: '8px' },
-  },
-  h('span', null, `${item.toolName || '审批'} · ${item.reason ?? item.sessionId}`),
-  h('button', { type: 'button', onClick: () => decide(item, 'allowed-once'), style: { marginLeft: '8px' } }, '允许一次'),
-  h('button', { type: 'button', onClick: () => decide(item, 'rejected'), style: { marginLeft: '8px' } }, '拒绝'),
-  )))
-}
-
 function decide(item: RemoteApproval, outcome: 'allowed-once' | 'rejected'): void {
   void fetch('/ahoy/approvals', {
     method: 'POST',
@@ -168,10 +155,8 @@ interface SlotOptions {
   id?: string
   key?: string
   order?: number
-  priority?: number
   label?: () => string
   locale?: string
-  select?: () => unknown
   inject?: () => { sessions?: OfficialSessions }
 }
 
@@ -207,11 +192,6 @@ function apply(ctx: ClientContext): void {
     label: () => t('sidebar.label'),
     locale: NS,
   }, () => null))
-  ctx.slots.inject('conversation.composer', () => ctx.slots.register({
-    name: 'conversation.composer',
-    priority: 5,
-    select: () => ({ kind: 'ahoy-approval' }),
-  }, () => h(ApprovalBar)))
   ctx.slots.inject('main', () => ctx.slots.register({
     name: 'main',
     key: 'dsh-ahoy',
