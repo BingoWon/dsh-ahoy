@@ -4,7 +4,7 @@ const id = 'dsh-ahoy'
 
 export default defineConfig([
   {
-    entry: { index: 'src/index.ts' },
+    entry: { index: 'src/index.ts', tree: 'src/tree.ts' },
     outDir: 'lib',
     format: 'esm',
     platform: 'node',
