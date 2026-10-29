@@ -416,7 +416,7 @@ export async function promptPeer(baseUrl: string, sessionId: string, text: strin
 }
 
 interface SessionControllerLike {
-  list(request: { cursor?: string }, signal: AbortSignal): Promise<{ items?: readonly { sessionId?: string, title?: string }[] }>
+  list(request: { cursor?: string }, signal: AbortSignal): Promise<{ items?: readonly { sessionId?: string, title?: string, projections?: { values?: { title?: string } } }[] }>
   prompt(request: {
     sessionId: string
     content: readonly { type: 'text', text: string }[]
@@ -475,7 +475,13 @@ export function sessionsFromHost(ctx: HostWithSessions, desk?: ApprovalDesk): Se
       const value = await list({}, new AbortController().signal)
       return (value.items ?? []).flatMap(item => {
         if (typeof item.sessionId !== 'string') return []
-        return [{ sessionId: item.sessionId, title: typeof item.title === 'string' ? item.title : item.sessionId }]
+        const projected = item.projections?.values?.title
+        const title = typeof projected === 'string' && projected.trim() !== ''
+          ? projected.trim()
+          : typeof item.title === 'string' && item.title.trim() !== ''
+            ? item.title.trim()
+            : item.sessionId
+        return [{ sessionId: item.sessionId, title }]
       })
     },
     async prompt(sessionId, text) {
