@@ -19,6 +19,7 @@ export { answerPeer, approvalsPeer, pagePeer, promptPeer, readPeer, sessionsFrom
 
 interface ToolsFace {
   register(tool: ReturnType<typeof createAhoyTool>): () => void
+  get?(name: string): unknown
 }
 
 interface WebServer {
@@ -323,6 +324,31 @@ function registerApprovalRoute(ctx: HostContext): void {
   ctx.effect(() => dispose, 'dsh-ahoy: approval-route')
 }
 
+function registerToolRoute(ctx: HostContext): void {
+  const webServer = optionalService<WebServer>(ctx, 'webServer')
+  if (webServer === undefined || typeof webServer.register !== 'function') return
+  const dispose = webServer.register({
+    kind: 'exact',
+    path: '/ahoy/tool',
+    handler(_request, response) {
+      const tools = (typeof ctx.get === 'function' ? ctx.get('tools') : undefined) as ToolsFace | undefined
+      let registered = false
+      try {
+        if (typeof tools?.get === 'function') registered = tools.get('ahoy') != null
+      } catch {
+        registered = false
+      }
+      const body = JSON.stringify({ name: 'ahoy', registered })
+      response.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+        'content-length': Buffer.byteLength(body),
+      })
+      response.end(body)
+    },
+  })
+  ctx.effect(() => dispose, 'dsh-ahoy: tool-route')
+}
+
 export function apply(ctx: HostContext): void {
   const desk = new ApprovalDesk()
   registerTree(ctx)
@@ -362,5 +388,6 @@ export function apply(ctx: HostContext): void {
     const dispose = face.register(createAhoyTool(peerList))
     ctx.effect(() => dispose, 'dsh-ahoy: tool')
   }
+  registerToolRoute(ctx)
 
 }
