@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { activePeers, listenPort, peerConfigPath, peerRefs, peerUrls, profileDirFromArgv, profileDirFromStack } from '../lib/peers.js'
+import { activePeers, listenEndpoint, listenPort, peerConfigPath, peerRefs, peerUrls, profileDirFromArgv, profileDirFromStack } from '../lib/peers.js'
 
 test('env peers win, otherwise the profile file is used', () => {
   assert.deepEqual(peerUrls('http://127.0.0.1:1, http://127.0.0.1:2', '{"peers":["http://127.0.0.1:9"]}'), [
@@ -20,6 +20,8 @@ test('env peers win, otherwise the profile file is used', () => {
   assert.equal(listenPort('47341', '1'), 47341)
   assert.equal(listenPort(undefined, '47341\n'), 47341)
   assert.equal(listenPort('nope', '47341'), undefined)
+  assert.deepEqual(listenEndpoint(undefined, '100.64.0.8:47341'), { host: '100.64.0.8', port: 47341 })
+  assert.deepEqual(listenEndpoint('47341', undefined), { host: '127.0.0.1', port: 47341 })
   assert.equal(
     profileDirFromStack('at file:///Users/bingo/.dsh/profiles/ahoy-a/#dsh-ahoy'),
     '/Users/bingo/.dsh/profiles/ahoy-a',

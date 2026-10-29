@@ -51,13 +51,25 @@ export function peerUrls(envValue: string | undefined, fileText: string | undefi
   return activePeers(peerRefs(envValue, fileText), now).map(peer => peer.url)
 }
 
-/** 环境变量优先。否则读 profile 目录里的 ahoy-listen，内容是一个端口。 */
-export function listenPort(envValue: string | undefined, fileText: string | undefined): number | undefined {
+/** 环境变量优先。内容可以是端口，或 `虚拟地址:端口`。 */
+export function listenEndpoint(envValue: string | undefined, fileText: string | undefined): { host: string, port: number } | undefined {
   const source = envValue !== undefined && envValue.trim() !== '' ? envValue : fileText
   if (source === undefined || source.trim() === '') return undefined
-  const port = Number(source.trim())
+  const trimmed = source.trim()
+  const colon = trimmed.lastIndexOf(':')
+  if (colon > 0 && !trimmed.includes('://')) {
+    const host = trimmed.slice(0, colon)
+    const port = Number(trimmed.slice(colon + 1))
+    if (host !== '' && Number.isInteger(port) && port >= 0 && port <= 65535) return { host, port }
+    return undefined
+  }
+  const port = Number(trimmed)
   if (!Number.isInteger(port) || port < 0 || port > 65535) return undefined
-  return port
+  return { host: '127.0.0.1', port }
+}
+
+export function listenPort(envValue: string | undefined, fileText: string | undefined): number | undefined {
+  return listenEndpoint(envValue, fileText)?.port
 }
 
 export function peerConfigPath(profileDir: string | undefined): string | undefined {
@@ -105,11 +117,11 @@ export function loadPeerUrls(
   return refs.map(peer => peer.url)
 }
 
-export function loadListenPort(
+export function loadListenEndpoint(
   env: NodeJS.ProcessEnv = process.env,
   argv: readonly string[] = process.argv,
   stack: string | undefined = new Error().stack,
-): number | undefined {
+): { host: string, port: number } | undefined {
   const peersFile = peerConfigPath(env.DSH_PROFILE_DIR || profileDirFromArgv(argv, env.DSH_HOME) || profileDirFromStack(stack))
   const file = peersFile === undefined ? undefined : join(peersFile, '..', 'ahoy-listen')
   let fileText: string | undefined
@@ -120,5 +132,13 @@ export function loadListenPort(
       fileText = undefined
     }
   }
-  return listenPort(env.DSH_AHOY_LISTEN, fileText)
+  return listenEndpoint(env.DSH_AHOY_LISTEN, fileText)
+}
+
+export function loadListenPort(
+  env: NodeJS.ProcessEnv = process.env,
+  argv: readonly string[] = process.argv,
+  stack: string | undefined = new Error().stack,
+): number | undefined {
+  return loadListenEndpoint(env, argv, stack)?.port
 }

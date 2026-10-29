@@ -9,13 +9,13 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createAhoyTool } from './ahoy-tool'
 import { ApprovalDesk, isApprovalOutcome, sessionIdFromApproval } from './approval'
 import { attachmentRemote, cancelRemote, followRemote, forkRemote, listWithPeers, modelRemote, pageRemote, projectionRemote, promptRemote, queueRemote, renameRemote, searchWithPeers } from './attach'
-import { loadListenPort, loadPeerUrls } from './peers'
+import { loadListenEndpoint, loadPeerUrls } from './peers'
 import { answerPeer, approvalsPeer, readPeer, sessionsFromHost, startPeer, type SessionBridge } from './peer'
 
 export { createAhoyTool, delegateToPeer, resolvePeer } from './ahoy-tool'
 export { setPeerToken } from './peers'
 export { ApprovalDesk, sessionIdFromApproval } from './approval'
-export { answerPeer, approvalsPeer, pagePeer, promptPeer, readPeer, sessionsFromHost, startPeer } from './peer'
+export { acceptPeer, answerPeer, approvalsPeer, pagePeer, promptPeer, readPeer, sessionsFromHost, startPeer } from './peer'
 
 interface ToolsFace {
   register(tool: ReturnType<typeof createAhoyTool>): () => void
@@ -367,13 +367,14 @@ export function apply(ctx: HostContext): void {
   const bridge: SessionBridge = sessionsFromHost(ctx, desk)
   installApproval(ctx, desk)
   installOfficialAttach(ctx)
-  const port = loadListenPort()
+  const listen = loadListenEndpoint()
   let closePeer: (() => Promise<void>) | undefined
   let stopped = false
-  if (port !== undefined) {
+  if (listen !== undefined) {
     const expiresText = process.env.DSH_AHOY_TOKEN_EXPIRES
     const expiresAt = expiresText !== undefined && expiresText !== '' ? Number(expiresText) : undefined
-    void startPeer(port, bridge, {
+    void startPeer(listen.port, bridge, {
+      host: listen.host,
       token: process.env.DSH_AHOY_TOKEN,
       expiresAt: expiresAt !== undefined && Number.isFinite(expiresAt) ? expiresAt : undefined,
     }).then(handle => {

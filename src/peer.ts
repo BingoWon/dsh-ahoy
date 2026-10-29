@@ -56,6 +56,12 @@ function remoteAddress(request: IncomingMessage): string {
   return address.startsWith('::ffff:') ? address.slice(7) : address
 }
 
+/** 没有配对令牌时只接受本机。有令牌时才接受 NetBird 或 Tailscale 的虚拟地址。 */
+export function acceptPeer(address: string, tokenConfigured: boolean): boolean {
+  if (address === '127.0.0.1' || address === '::1') return true
+  return tokenConfigured && address !== ''
+}
+
 function tokenMatches(request: IncomingMessage, expected: string | undefined, expiresAt?: number): boolean {
   if (expiresAt !== undefined && Date.now() >= expiresAt) return false
   if (expected === undefined || expected === '') return true
@@ -67,14 +73,14 @@ function tokenMatches(request: IncomingMessage, expected: string | undefined, ex
   return left.length === right.length && timingSafeEqual(left, right)
 }
 
-/** 只接受本机连进来。设了令牌以后，撤销就是换掉这枚令牌。 */
-export function startPeer(port: number, sessions: SessionBridge, options?: { token?: string, expiresAt?: number }): Promise<PeerHandle> {
+/** 默认只绑本机。host 写成虚拟地址后，对方才能直接连过来。 */
+export function startPeer(port: number, sessions: SessionBridge, options?: { host?: string, token?: string, expiresAt?: number }): Promise<PeerHandle> {
   const server: Server = createServer((request, response) => {
     void handle(request, response, sessions, options?.token, options?.expiresAt)
   })
   return new Promise((resolve, reject) => {
     server.once('error', reject)
-    server.listen(port, '127.0.0.1', () => {
+    server.listen(port, options?.host ?? '127.0.0.1', () => {
       const address = server.address()
       if (address === null || typeof address === 'string') {
         reject(new Error('peer did not bind a TCP port'))
@@ -92,7 +98,8 @@ export function startPeer(port: number, sessions: SessionBridge, options?: { tok
 
 async function handle(request: IncomingMessage, response: ServerResponse, sessions: SessionBridge, token?: string, expiresAt?: number): Promise<void> {
   const address = remoteAddress(request)
-  if (address !== '127.0.0.1' && address !== '::1') {
+  const tokenConfigured = token !== undefined && token !== ''
+  if (!acceptPeer(address, tokenConfigured)) {
     sendJson(response, 403, { error: 'only loopback clients are accepted' })
     return
   }
