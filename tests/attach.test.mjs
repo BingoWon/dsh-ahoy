@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { listWithPeers, parseRemoteSessionId, promptRemote } from '../lib/attach.js'
+import { listWithPeers, pageRemote, parseRemoteSessionId, promptRemote } from '../lib/attach.js'
 import { startPeer } from '../lib/index.js'
 import { remoteSessionId } from '../lib/tree.js'
 
@@ -13,6 +13,9 @@ test('official list gains the peer session and a prompt goes to that peer', asyn
     async prompt(sessionId, text) {
       prompts.push({ sessionId, text })
       return { accepted: true, sessionId }
+    },
+    async page(sessionId) {
+      return { records: [{ sessionId, text: '部署脚本' }], cursor: 1 }
     },
   })
   try {
@@ -31,6 +34,9 @@ test('official list gains the peer session and a prompt goes to that peer', asyn
     assert.deepEqual(forwarded, { accepted: true })
     assert.deepEqual(prompts, [{ sessionId: 'session-b', text: '看一下部署脚本' }])
     assert.equal(await promptRemote({ sessionId: 'session-a', content: [] }), undefined)
+    const page = await pageRemote(remoteId, { maxMessages: 20 })
+    assert.equal(page.records[0].sessionId, remoteId)
+    assert.equal(page.records[0].text, '部署脚本')
   } finally {
     await peer.close()
   }

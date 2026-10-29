@@ -6,11 +6,11 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { ahoyTool } from './ahoy-tool'
-import { listWithPeers, promptRemote } from './attach'
+import { listWithPeers, pageRemote, promptRemote } from './attach'
 import { readPeer, sessionsFromHost, startPeer, type SessionBridge } from './peer'
 
 export { delegateToPeer } from './ahoy-tool'
-export { promptPeer, readPeer, sessionsFromHost, startPeer } from './peer'
+export { pagePeer, promptPeer, readPeer, sessionsFromHost, startPeer } from './peer'
 
 interface ToolsFace {
   register(tool: typeof ahoyTool): () => void
@@ -92,6 +92,8 @@ function installOfficialAttach(ctx: HostContext): void {
   const face = controller as {
     list?: (request: unknown, signal: AbortSignal) => Promise<{ items?: readonly { sessionId?: string }[] }>
     prompt?: (request: { sessionId: string, content?: readonly { type?: string, text?: string }[] }, signal: AbortSignal) => Promise<unknown>
+    page?: (request: { address?: { kind?: string, sessionId?: string } }, signal: AbortSignal) => Promise<unknown>
+    events?: (request: { address?: { kind?: string, sessionId?: string } }, signal: AbortSignal) => Promise<unknown>
   } | undefined
   if (face === undefined || typeof face.list !== 'function' || typeof face.prompt !== 'function') return
   const originalList = face.list.bind(face)
@@ -103,9 +105,24 @@ function installOfficialAttach(ctx: HostContext): void {
     if (forwarded !== undefined) return forwarded
     return originalPrompt(request, signal)
   }
+  const wrapPage = (original: (request: { address?: { kind?: string, sessionId?: string } }, signal: AbortSignal) => Promise<unknown>) =>
+    async (request: { address?: { kind?: string, sessionId?: string } }, signal: AbortSignal) => {
+      const sessionId = request.address?.kind === 'session' ? request.address.sessionId : undefined
+      if (typeof sessionId === 'string') {
+        const forwarded = await pageRemote(sessionId, request)
+        if (forwarded !== undefined) return forwarded
+      }
+      return original(request, signal)
+    }
+  const originalPage = typeof face.page === 'function' ? face.page.bind(face) : undefined
+  const originalEvents = typeof face.events === 'function' ? face.events.bind(face) : undefined
+  if (originalPage !== undefined) face.page = wrapPage(originalPage)
+  if (originalEvents !== undefined) face.events = wrapPage(originalEvents)
   ctx.effect(() => () => {
     face.list = originalList
     face.prompt = originalPrompt
+    if (originalPage !== undefined) face.page = originalPage
+    if (originalEvents !== undefined) face.events = originalEvents
   }, 'dsh-ahoy: attach')
 }
 
