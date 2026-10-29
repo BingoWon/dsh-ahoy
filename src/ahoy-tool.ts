@@ -32,14 +32,23 @@ export const ahoyTool = {
   name: 'ahoy',
   description: '把一句话交给另一台已经配对的 DeepSeek Harness。执行发生在对方机器上。返回会话标识和一句摘要，不返回对方的工具日志。',
   parameters: {
-    peer: { type: 'string', description: '对方插件的地址，例如 http://127.0.0.1:47321', required: true },
-    text: { type: 'string', description: '要交给对方的话', required: true },
-    sessionId: { type: 'string', description: '对方已有会话。省略时使用对方列表里的第一场会话。' },
+    type: 'object',
+    properties: {
+      peer: { type: 'string', description: '对方插件的地址，例如 http://127.0.0.1:47321' },
+      text: { type: 'string', description: '要交给对方的话' },
+      sessionId: { type: 'string', description: '对方已有会话。省略时使用对方列表里的第一场会话。' },
+    },
+    required: ['peer', 'text'],
   },
-  async execute(args: { peer?: string, text?: string, sessionId?: string }): Promise<AhoyResult> {
+  output: {
+    schema: { type: 'string' },
+    render: (_args: unknown, value: unknown) => [{ type: 'text', text: String(value) }],
+  },
+  async execute(args: { peer?: string, text?: string, sessionId?: string }): Promise<string> {
     if (typeof args.peer !== 'string' || typeof args.text !== 'string') {
       throw new Error('ahoy 需要 peer 和 text')
     }
-    return delegateToPeer({ peer: args.peer, text: args.text, sessionId: args.sessionId })
+    const result = await delegateToPeer({ peer: args.peer, text: args.text, sessionId: args.sessionId })
+    return result.summary
   },
 }

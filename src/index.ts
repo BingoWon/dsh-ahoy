@@ -23,6 +23,9 @@ interface HostContext {
 
 export const name = 'dsh-ahoy'
 
+/** 会话服务和工具服务都到齐后再启动。Cordis 不允许读取没有声明的服务。 */
+export const inject = ['sessionController', 'tools']
+
 export function apply(ctx: HostContext): void {
   const listen = process.env.DSH_AHOY_LISTEN
   let closePeer: (() => Promise<void>) | undefined
