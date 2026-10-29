@@ -2,11 +2,13 @@
  * dsh-ahoy 宿主插件。
  *
  * 两个 profile 用 127.0.0.1 直接互连。DSH_AHOY_LISTEN 是本机监听端口。
+ * 对方地址用 DSH_AHOY_PEERS，或 profile 目录里的 ahoy-peers.json。
  * 不要加转发进程，也不要走 SSH。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { ahoyTool } from './ahoy-tool'
 import { listWithPeers, pageRemote, promptRemote } from './attach'
+import { loadPeerUrls } from './peers'
 import { readPeer, sessionsFromHost, startPeer, type SessionBridge } from './peer'
 
 export { delegateToPeer } from './ahoy-tool'
@@ -42,7 +44,7 @@ function optionalService<T>(ctx: HostContext, name: string): T | undefined {
 }
 
 function peerList(): string[] {
-  return (process.env.DSH_AHOY_PEERS ?? '').split(',').map(item => item.trim()).filter(item => item !== '')
+  return loadPeerUrls()
 }
 
 function registerTree(ctx: HostContext): void {

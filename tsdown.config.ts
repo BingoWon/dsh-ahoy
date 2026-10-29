@@ -4,7 +4,7 @@ const id = 'dsh-ahoy'
 
 export default defineConfig([
   {
-    entry: { index: 'src/index.ts', tree: 'src/tree.ts', attach: 'src/attach.ts' },
+    entry: { index: 'src/index.ts', tree: 'src/tree.ts', attach: 'src/attach.ts', peers: 'src/peers.ts' },
     outDir: 'lib',
     format: 'esm',
     platform: 'node',
