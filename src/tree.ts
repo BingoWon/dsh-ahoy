@@ -3,6 +3,16 @@ export function remoteSessionId(peer: string, sessionId: string): string {
   return `ahoy:${encodeURIComponent(peer)}:${sessionId}`
 }
 
+/** 官方会话树用路径的最后一段当分组标题。 */
+export function machineGroupPath(peer: string): string {
+  try {
+    const host = new URL(peer).host
+    return `ahoy/${host !== '' ? host : peer}`
+  } catch {
+    return `ahoy/${peer}`
+  }
+}
+
 export interface TreeSession {
   peer: string
   sessionId: string

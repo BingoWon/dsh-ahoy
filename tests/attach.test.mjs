@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { cancelRemote, followRemote, listWithPeers, pageRemote, parseRemoteSessionId, projectionRemote, promptRemote } from '../lib/attach.js'
 import { startPeer } from '../lib/index.js'
-import { remoteSessionId } from '../lib/tree.js'
+import { machineGroupPath, remoteSessionId } from '../lib/tree.js'
 
 test('official list gains the peer session and a prompt goes to that peer', async () => {
   const prompts = []
@@ -37,6 +37,7 @@ test('official list gains the peer session and a prompt goes to that peer', asyn
     const remoteId = remoteSessionId(url, 'session-b')
     assert.deepEqual(merged.items.map(item => item.sessionId), ['session-a', remoteId])
     assert.equal(merged.items[1].projections.values.title, '部署脚本')
+    assert.equal(merged.items[1].cwd, machineGroupPath(url))
     assert.deepEqual(parseRemoteSessionId(remoteId), { peer: url, sessionId: 'session-b' })
     const forwarded = await promptRemote({
       sessionId: remoteId,

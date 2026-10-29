@@ -1,5 +1,5 @@
 import { callPeer, cancelPeer, followPeer, pagePeer, promptPeer, readPeer, type RemoteSession } from './peer'
-import { remoteSessionId } from './tree'
+import { machineGroupPath, remoteSessionId } from './tree'
 
 export interface ListedSession {
   sessionId: string
@@ -8,6 +8,7 @@ export interface ListedSession {
   updatedAt?: number
   running?: boolean
   blank?: boolean
+  cwd?: string
   projections?: {
     kind: 'cached'
     asOfSeq: number
@@ -43,6 +44,7 @@ export function remoteListItem(peer: string, session: RemoteSession): ListedSess
     updatedAt: Date.now(),
     running: false,
     blank: false,
+    cwd: machineGroupPath(peer),
     projections: { kind: 'cached', asOfSeq: 0, values: { title: session.title } },
   }
 }
