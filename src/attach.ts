@@ -8,6 +8,7 @@ export interface ListedSession {
   updatedAt?: number
   running?: boolean
   blank?: boolean
+  formatStatus?: 'current'
   cwd?: string
   projections?: {
     kind: 'cached'
@@ -44,6 +45,7 @@ export function remoteListItem(peer: string, session: RemoteSession): ListedSess
     updatedAt: Date.now(),
     running: false,
     blank: false,
+    formatStatus: 'current',
     cwd: machineGroupPath(peer),
     projections: { kind: 'cached', asOfSeq: 0, values: { title: session.title } },
   }

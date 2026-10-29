@@ -8,7 +8,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createAhoyTool } from './ahoy-tool'
 import { ApprovalDesk, isApprovalOutcome, sessionIdFromApproval } from './approval'
-import { attachmentRemote, cancelRemote, createOnPeer, followRemote, forkRemote, listWithPeers, modelRemote, pageRemote, projectionRemote, promptRemote, queueRemote, renameRemote, searchWithPeers } from './attach'
+import { attachmentRemote, cancelRemote, createOnPeer, followRemote, forkRemote, listWithPeers, modelRemote, pageRemote, projectionRemote, promptRemote, queueRemote, remoteListItem, renameRemote, searchWithPeers } from './attach'
 import { PairDesk, redeemPairCode } from './pair'
 import { loadListenEndpoint, loadPeerUrls, savePeerRef } from './peers'
 import { cardAfterFetch, peerForGroup, type CachedMachine } from './tree'
@@ -44,6 +44,7 @@ interface HostContext {
   effect(dispose: () => void, label: string): void
   get?(name: string): unknown
   on?(event: string, listener: (this: unknown, request: ApprovalRequest, next: () => unknown) => unknown): () => void
+  emit?(event: string, summary: unknown): void
   tools?: ToolsFace
   webServer?: WebServer
   sessionController?: Parameters<typeof sessionsFromHost>[0]['sessionController']
@@ -282,6 +283,33 @@ function installOfficialAttach(ctx: HostContext): void {
   const originalCreate = typeof face.create === 'function' ? face.create.bind(face) : undefined
   const originalFollow = typeof face.follow === 'function' ? face.follow.bind(face) : undefined
   console.error(`[dsh-ahoy] 官方会话列表会带上 ${peers.length} 个对方地址`)
+  const announced = new Set<string>()
+  let emit: ((event: string, summary: unknown) => void) | undefined
+  try {
+    if (typeof ctx.emit === 'function') emit = ctx.emit.bind(ctx)
+  } catch {
+    emit = undefined
+  }
+  const announce = async (): Promise<void> => {
+    if (emit === undefined) return
+    for (const peer of peerList()) {
+      try {
+        const status = await readPeer(peer)
+        for (const session of status.sessions) {
+          if (session.sessionId.startsWith('ahoy:')) continue
+          const item = remoteListItem(peer, session)
+          if (announced.has(item.sessionId)) continue
+          emit('api-session/added', item)
+          announced.add(item.sessionId)
+        }
+      } catch {
+        // 对方暂时不在线时不要打断本机列表。
+      }
+    }
+  }
+  void announce()
+  const timer = setInterval(() => { void announce() }, 3000)
+  ctx.effect(() => clearInterval(timer), 'dsh-ahoy: announce')
   face.list = async (request, signal) => listWithPeers(await originalList(request, signal) as { items?: { sessionId: string }[] }, peers)
   face.prompt = async (request, signal) => {
     const forwarded = await promptRemote(request)
