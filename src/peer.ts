@@ -17,6 +17,7 @@ export interface SessionBridge {
   prompt(sessionId: string, text: string): Promise<PromptResult>
   page?(sessionId: string, request: Record<string, unknown>): Promise<unknown>
   cancel?(sessionId: string): Promise<{ accepted: true }>
+  call?(method: 'projections' | 'rename', sessionId: string, request: Record<string, unknown>): Promise<unknown>
 }
 
 export interface PeerStatus extends MachineStatus {
@@ -99,6 +100,20 @@ async function handle(request: IncomingMessage, response: ServerResponse, sessio
       sendJson(response, 200, await sessions.page(body.sessionId, body.request as Record<string, unknown>))
       return
     }
+    if (request.url === '/v1/session') {
+      if (sessions.call === undefined) {
+        sendJson(response, 404, { error: 'session call is not available' })
+        return
+      }
+      const body = JSON.parse(await readBody(request)) as { method?: unknown, sessionId?: unknown, request?: unknown }
+      if ((body.method !== 'projections' && body.method !== 'rename') || typeof body.sessionId !== 'string') {
+        sendJson(response, 400, { error: 'method and sessionId are required' })
+        return
+      }
+      const extra = body.request !== null && typeof body.request === 'object' ? body.request as Record<string, unknown> : {}
+      sendJson(response, 200, await sessions.call(body.method, body.sessionId, extra))
+      return
+    }
     if (request.url === '/v1/cancel') {
       if (sessions.cancel === undefined) {
         sendJson(response, 404, { error: 'cancel is not available' })
@@ -143,6 +158,19 @@ export async function pagePeer(baseUrl: string, sessionId: string, request: Reco
   return await response.json()
 }
 
+export async function callPeer(baseUrl: string, method: 'projections' | 'rename', sessionId: string, request: Record<string, unknown>): Promise<unknown> {
+  const response = await fetch(new URL('/v1/session', baseUrl), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ method, sessionId, request }),
+  })
+  if (!response.ok) {
+    const body = await response.json().catch(() => undefined) as { error?: unknown } | undefined
+    throw new Error(typeof body?.error === 'string' ? body.error : `peer session failed: ${response.status}`)
+  }
+  return await response.json()
+}
+
 export async function cancelPeer(baseUrl: string, sessionId: string): Promise<{ accepted: true }> {
   const response = await fetch(new URL('/v1/cancel', baseUrl), {
     method: 'POST',
@@ -178,6 +206,8 @@ interface SessionControllerLike {
   page?(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>
   events?(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>
   cancel?(request: { sessionId: string }, signal: AbortSignal): Promise<unknown>
+  projections?(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>
+  rename?(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>
 }
 
 interface HostWithSessions {
@@ -192,6 +222,8 @@ export function sessionsFromHost(ctx: HostWithSessions): SessionBridge {
   const list = face !== undefined && typeof face.list === 'function' ? face.list.bind(face) : undefined
   const prompt = face !== undefined && typeof face.prompt === 'function' ? face.prompt.bind(face) : undefined
   const cancel = face !== undefined && typeof face.cancel === 'function' ? face.cancel.bind(face) : undefined
+  const projections = face !== undefined && typeof face.projections === 'function' ? face.projections.bind(face) : undefined
+  const rename = face !== undefined && typeof face.rename === 'function' ? face.rename.bind(face) : undefined
   const page = face !== undefined && typeof face.page === 'function'
     ? face.page.bind(face)
     : face !== undefined && typeof face.events === 'function'
@@ -217,6 +249,11 @@ export function sessionsFromHost(ctx: HostWithSessions): SessionBridge {
         requestId: crypto.randomUUID(),
       }, new AbortController().signal)
       return { accepted: true, sessionId }
+    },
+    async call(method, sessionId, request) {
+      const target = method === 'projections' ? projections : rename
+      if (target === undefined) throw new Error('这台 DSH 没有这个会话接口')
+      return await target({ ...request, sessionId }, new AbortController().signal)
     },
     async cancel(sessionId) {
       if (cancel === undefined) throw new Error('这台 DSH 没有取消接口')

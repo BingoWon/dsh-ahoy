@@ -1,4 +1,4 @@
-import { cancelPeer, pagePeer, promptPeer, readPeer, type RemoteSession } from './peer'
+import { callPeer, cancelPeer, pagePeer, promptPeer, readPeer, type RemoteSession } from './peer'
 import { remoteSessionId } from './tree'
 
 export interface ListedSession {
@@ -88,6 +88,14 @@ export async function cancelRemote(sessionId: string): Promise<{ accepted: true 
   const remote = parseRemoteSessionId(sessionId)
   if (remote === undefined) return undefined
   return await cancelPeer(remote.peer, remote.sessionId)
+}
+
+export async function projectionRemote(sessionId: string): Promise<unknown | undefined> {
+  const remote = parseRemoteSessionId(sessionId)
+  if (remote === undefined) return undefined
+  const value = await callPeer(remote.peer, 'projections', remote.sessionId, {})
+  const encoded = JSON.stringify(value).split(remote.sessionId).join(sessionId)
+  return JSON.parse(encoded) as unknown
 }
 
 export async function pageRemote(sessionId: string, request: Record<string, unknown>): Promise<unknown | undefined> {

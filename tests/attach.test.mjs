@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { cancelRemote, listWithPeers, pageRemote, parseRemoteSessionId, promptRemote } from '../lib/attach.js'
+import { cancelRemote, listWithPeers, pageRemote, parseRemoteSessionId, projectionRemote, promptRemote } from '../lib/attach.js'
 import { startPeer } from '../lib/index.js'
 import { remoteSessionId } from '../lib/tree.js'
 
@@ -14,6 +14,9 @@ test('official list gains the peer session and a prompt goes to that peer', asyn
     async prompt(sessionId, text) {
       prompts.push({ sessionId, text })
       return { accepted: true, sessionId }
+    },
+    async call(method, sessionId) {
+      return { method, sessionId, values: { title: '部署脚本' } }
     },
     async cancel(sessionId) {
       cancels.push(sessionId)
@@ -44,6 +47,9 @@ test('official list gains the peer session and a prompt goes to that peer', asyn
     assert.equal(page.records[0].text, '部署脚本')
     assert.deepEqual(await cancelRemote(remoteId), { accepted: true })
     assert.deepEqual(cancels, ['session-b'])
+    const projection = await projectionRemote(remoteId)
+    assert.equal(projection.values.title, '部署脚本')
+    assert.equal(projection.sessionId, remoteId)
     assert.equal(await cancelRemote('session-a'), undefined)
   } finally {
     await peer.close()
