@@ -9,6 +9,31 @@ export interface TreeSession {
   title: string
 }
 
+export interface MachineCard {
+  peer: string
+  cpuPercent: number | null
+  memoryUsedBytes: number | null
+  memoryTotalBytes: number | null
+  diskUsedBytes: number | null
+  diskTotalBytes: number | null
+  sessions: { sessionId: string, title: string }[]
+  error?: string
+}
+
+/** 把字节数收成卡片上的短数字。空值保持破折号，不假装读到了 0。 */
+export function formatBytes(value: number | null): string {
+  if (value === null || !Number.isFinite(value) || value < 0) return '—'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let size = value
+  let unit = 0
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024
+    unit += 1
+  }
+  const digits = unit === 0 || size >= 10 ? 0 : 1
+  return `${size.toFixed(digits)} ${units[unit]}`
+}
+
 export interface TreeFrame {
   type: 'host/session-added' | 'session/projection'
   sessionId: string

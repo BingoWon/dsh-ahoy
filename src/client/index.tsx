@@ -3,7 +3,7 @@
  * 桌面应用加载的是同一套客户端。
  */
 import { createElement as h, useEffect, useState, type ReactNode } from 'react'
-import { framesForNewSessions, type TreeSession } from '../tree'
+import { formatBytes, framesForNewSessions, type MachineCard, type TreeSession } from '../tree'
 
 const NS = 'dsh-ahoy'
 const announced = new Set<string>()
@@ -40,7 +40,8 @@ interface OfficialSessions {
   handleHostEnvelope?(envelope: HostEnvelope): void
 }
 
-function useRemoteSessions(sessions: OfficialSessions | undefined): TreeSession[] {
+function useRemoteSessions(sessions: OfficialSessions | undefined): { machines: MachineCard[], rows: TreeSession[] } {
+  const [machines, setMachines] = useState<MachineCard[]>([])
   const [rows, setRows] = useState<TreeSession[]>([])
   useEffect(() => {
     let stopped = false
@@ -48,9 +49,12 @@ function useRemoteSessions(sessions: OfficialSessions | undefined): TreeSession[
       try {
         const response = await fetch('/ahoy/tree')
         if (!response.ok) return
-        const body = await response.json() as { sessions?: TreeSession[] }
+        const body = await response.json() as { machines?: MachineCard[], sessions?: TreeSession[] }
         const next = Array.isArray(body.sessions) ? body.sessions : []
-        if (!stopped) setRows(next)
+        if (!stopped) {
+          setRows(next)
+          setMachines(Array.isArray(body.machines) ? body.machines : [])
+        }
         for (const frame of framesForNewSessions(announced, next)) {
           sessions?.handleHostEnvelope?.({
             type: 'server-request',
@@ -70,19 +74,31 @@ function useRemoteSessions(sessions: OfficialSessions | undefined): TreeSession[
       clearInterval(timer)
     }
   }, [sessions])
-  return rows
+  return { machines, rows }
+}
+
+function machineLine(machine: MachineCard): string {
+  if (machine.error !== undefined) return machine.error
+  const cpu = machine.cpuPercent === null ? '—' : `${Math.round(machine.cpuPercent)}%`
+  return `CPU ${cpu} · 内存 ${formatBytes(machine.memoryUsedBytes)} / ${formatBytes(machine.memoryTotalBytes)} · 磁盘 ${formatBytes(machine.diskUsedBytes)} / ${formatBytes(machine.diskTotalBytes)}`
 }
 
 function MachineList({ sessions }: { sessions?: OfficialSessions }): ReactNode {
   const text = dictionary()
-  const rows = useRemoteSessions(sessions)
+  const { machines } = useRemoteSessions(sessions)
   return h('section', { style: { padding: '16px', lineHeight: 1.5 } },
     h('h2', { style: { margin: '0 0 8px', fontSize: '16px' } }, text.title),
-    rows.length === 0
+    machines.length === 0
       ? h('p', { style: { margin: 0 } }, text.empty)
-      : h('ul', { style: { margin: 0, paddingLeft: '18px' } }, rows.map(row => h('li', {
-        key: `${row.peer}:${row.sessionId}`,
-      }, `${row.title} · ${row.peer}`))),
+      : machines.map(machine => h('article', {
+        key: machine.peer,
+        style: { marginBottom: '12px' },
+      },
+      h('strong', null, machine.peer),
+      h('p', { style: { margin: '4px 0' } }, machineLine(machine)),
+      machine.sessions.length === 0 ? null : h('ul', { style: { margin: 0, paddingLeft: '18px' } },
+        machine.sessions.map(session => h('li', { key: session.sessionId }, session.title))),
+      )),
   )
 }
 

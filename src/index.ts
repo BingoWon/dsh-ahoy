@@ -53,22 +53,46 @@ function registerTree(ctx: HostContext): void {
     path: '/ahoy/tree',
     handler(_request, response) {
       void (async () => {
+        const machines: {
+          peer: string
+          cpuPercent: number | null
+          memoryUsedBytes: number | null
+          memoryTotalBytes: number | null
+          diskUsedBytes: number | null
+          diskTotalBytes: number | null
+          sessions: { sessionId: string, title: string }[]
+          error?: string
+        }[] = []
         const sessions: { peer: string, sessionId: string, title: string }[] = []
         for (const peer of peerList()) {
           try {
             const status = await readPeer(peer)
-            for (const session of status.sessions) {
-              sessions.push({ peer, sessionId: session.sessionId, title: session.title })
-            }
-          } catch (error) {
-            sessions.push({
+            const rows = status.sessions.map(session => ({ sessionId: session.sessionId, title: session.title }))
+            machines.push({
               peer,
-              sessionId: '',
-              title: error instanceof Error ? error.message : String(error),
+              cpuPercent: status.cpuPercent,
+              memoryUsedBytes: status.memoryUsedBytes,
+              memoryTotalBytes: status.memoryTotalBytes,
+              diskUsedBytes: status.diskUsedBytes,
+              diskTotalBytes: status.diskTotalBytes,
+              sessions: rows,
+            })
+            for (const session of rows) sessions.push({ peer, ...session })
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            machines.push({
+              peer,
+              cpuPercent: null,
+              memoryUsedBytes: null,
+              memoryTotalBytes: null,
+              diskUsedBytes: null,
+              diskTotalBytes: null,
+              sessions: [],
+              error: message,
             })
           }
         }
-        const body = JSON.stringify({ sessions })
+        const body = JSON.stringify({ machines, sessions })
         response.writeHead(200, {
           'content-type': 'application/json; charset=utf-8',
           'content-length': Buffer.byteLength(body),
