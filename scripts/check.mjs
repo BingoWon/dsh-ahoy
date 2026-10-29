@@ -11,7 +11,9 @@ apply({
     return dispose
   },
 })
-if (!labels.includes('dsh-ahoy: ready')) throw new Error('host plugin did not register')
+if (!labels.includes('dsh-ahoy: idle') && !labels.includes('dsh-ahoy: peer')) {
+  throw new Error('host plugin did not register')
+}
 
 const client = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
 if (!client.includes('window.__ModuleLoader__.load') || !client.includes('id: "dsh-ahoy"')) {
